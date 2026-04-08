@@ -1,0 +1,24 @@
+# data
+data/
+*.pkl
+*.json
+
+# checkpoints
+ckpts/
+work_dirs/
+test/
+
+# results
+result_vis/
+vis_results/
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+streampetr_env/
+
+# logs
+logs/
+*.out
+*.err
