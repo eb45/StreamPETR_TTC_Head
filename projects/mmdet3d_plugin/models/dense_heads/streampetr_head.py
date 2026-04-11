@@ -26,6 +26,10 @@ from projects.mmdet3d_plugin.core.bbox.util import normalize_bbox
 from mmdet.models.utils import NormedLinear
 from projects.mmdet3d_plugin.models.utils.positional_encoding import pos2posemb3d, pos2posemb1d, nerf_positional_encoding
 from projects.mmdet3d_plugin.models.utils.misc import MLN, topk_gather, transform_reference_points, memory_refresh, SELayer_Linear
+from projects.mmdet3d_plugin.models.dense_heads.dn_utils import (
+    gt_boxes_for_dn,
+    gt_labels_for_dn,
+)
 
 @HEADS.register_module()
 class StreamPETRHead(AnchorFreeHead):
@@ -105,6 +109,11 @@ class StreamPETRHead(AnchorFreeHead):
                  split = 0.5,
                  init_cfg=None,
                  normedlinear=False,
+                 ttc_head=None,
+                 loss_ttc_weight=2.0,
+                 ttc_low_thresh_s=3.0,
+                 ttc_low_weight=3.0,
+                 ttc_smooth_beta=1.0,
                  **kwargs):
         # NOTE here use `AnchorFreeHead` instead of `TransformerHead`,
         # since it brings inconvenience when the initialization of
@@ -182,13 +191,29 @@ class StreamPETRHead(AnchorFreeHead):
         self.bbox_noise_scale = noise_scale
         self.bbox_noise_trans = noise_trans
         self.dn_weight = dn_weight
-        self.split = split 
+        self.split = split
+        self.loss_ttc_weight = loss_ttc_weight
+        self.ttc_low_thresh_s = ttc_low_thresh_s
+        self.ttc_low_weight = ttc_low_weight
+        self.ttc_smooth_beta = ttc_smooth_beta
 
         self.act_cfg = transformer.get('act_cfg',
                                        dict(type='ReLU', inplace=True))
         self.num_pred = 6
         self.normedlinear = normedlinear
         super(StreamPETRHead, self).__init__(num_classes, in_channels, init_cfg = init_cfg)
+
+        if ttc_head is not None:
+            from projects.mmdet3d_plugin.models.dense_heads.ttc_head import TTCRiskHead
+
+            if isinstance(ttc_head, dict):
+                _cfg = ttc_head.copy()
+                _cfg.pop('type', None)
+                self.ttc_head = TTCRiskHead(**_cfg)
+            else:
+                self.ttc_head = ttc_head
+        else:
+            self.ttc_head = None
 
         self.loss_cls = build_loss(loss_cls)
         self.loss_bbox = build_loss(loss_bbox)
@@ -450,8 +475,13 @@ class StreamPETRHead(AnchorFreeHead):
 
     def prepare_for_dn(self, batch_size, reference_points, img_metas):
         if self.training and self.with_dn:
-            targets = [torch.cat((img_meta['gt_bboxes_3d']._data.gravity_center, img_meta['gt_bboxes_3d']._data.tensor[:, 3:]),dim=1) for img_meta in img_metas ]
-            labels = [img_meta['gt_labels_3d']._data for img_meta in img_metas ]
+            targets = []
+            labels = []
+            for img_meta in img_metas:
+                box = gt_boxes_for_dn(img_meta)
+                n = int(box.tensor.shape[0])
+                labels.append(gt_labels_for_dn(img_meta, num_boxes=n))
+                targets.append(torch.cat((box.gravity_center, box.tensor[:, 3:]), dim=1))
             known = [(torch.ones_like(t)).cuda() for t in labels]
             know_idx = known
             unmask_bbox = unmask_label = torch.cat(known)
@@ -646,6 +676,12 @@ class StreamPETRHead(AnchorFreeHead):
                 'all_bbox_preds': all_bbox_preds,
                 'dn_mask_dict':None,
             }
+
+        if self.ttc_head is not None:
+            pad = mask_dict['pad_size'] if mask_dict and mask_dict.get('pad_size', 0) > 0 else 0
+            outs['ttc_query_feats'] = outs_dec[-1][:, pad:, :].contiguous()
+        else:
+            outs['ttc_query_feats'] = None
 
         return outs
     
@@ -905,12 +941,300 @@ class StreamPETRHead(AnchorFreeHead):
         
         return self.dn_weight * loss_cls, self.dn_weight * loss_bbox
     
+    def loss_ttc(
+        self,
+        cls_scores_last,
+        bbox_preds_last,
+        query_feats,
+        gt_bboxes_list,
+        gt_labels_list,
+        gt_ttc_list,
+    ):
+        total = cls_scores_last.new_tensor(0.0)
+        denom = cls_scores_last.new_tensor(0.0)
+        bs = cls_scores_last.size(0)
+        for b in range(bs):
+            if (
+                b >= len(gt_ttc_list)
+                or b >= len(gt_bboxes_list)
+                or b >= len(gt_labels_list)
+            ):
+                continue
+            gt_ttc = gt_ttc_list[b]
+            if gt_ttc is None or gt_ttc.numel() == 0:
+                continue
+            qf = query_feats[b]
+            cls_i = cls_scores_last[b]
+            box_i = bbox_preds_last[b]
+            assign = self.assigner.assign(
+                box_i,
+                cls_i,
+                gt_bboxes_list[b],
+                gt_labels_list[b],
+                None,
+                self.match_costs,
+                self.match_with_velo,
+            )
+            sampling = self.sampler.sample(assign, box_i, gt_bboxes_list[b])
+            if sampling.num_gts == 0:
+                continue
+            pos = sampling.pos_inds
+            gt_ix = sampling.pos_assigned_gt_inds
+            # Do not backprop through StreamPETR when training the TTC head only.
+            pred = self.ttc_head(qf[pos].detach())
+            tgt = gt_ttc.to(pred.device)[gt_ix]
+            m = torch.isfinite(tgt) & (tgt >= 0)
+            if not m.any():
+                continue
+            pred = pred[m]
+            tgt = tgt[m]
+            err = torch.nn.functional.smooth_l1_loss(pred, tgt, beta=self.ttc_smooth_beta, reduction='none')
+            w = torch.where(tgt < self.ttc_low_thresh_s, self.ttc_low_weight, 1.0).to(pred.dtype)
+            total = total + (err * w).sum()
+            denom = denom + w.sum()
+        if denom <= 0:
+            # Plain `new_tensor(0.)` has no grad_fn. With det/cls weights at 0, the summed
+            # loss then does not require grad and Fp16OptimizerHook.backward fails on some iters.
+            z = None
+            for p in self.ttc_head.parameters():
+                t = p.sum() * 0.0
+                z = t if z is None else z + t
+            return z if z is not None else cls_scores_last.new_tensor(0.0)
+        return total / denom
+
+    def ttc_pairwise_errors(
+        self,
+        preds_dicts,
+        gt_bboxes_list,
+        gt_labels_list,
+        gt_ttc_list,
+        return_gt_indices=False,
+    ):
+        """Matched pred/GT TTC and class id per GT (same assignment as ``loss_ttc``). For offline eval."""
+        if (
+            self.ttc_head is None
+            or preds_dicts is None
+            or preds_dicts.get("ttc_query_feats") is None
+        ):
+            return None
+        cs = preds_dicts["all_cls_scores"][-1]
+        bp = preds_dicts["all_bbox_preds"][-1]
+        qf = preds_dicts["ttc_query_feats"]
+        if preds_dicts.get("dn_mask_dict") is not None:
+            pad = preds_dicts["dn_mask_dict"]["pad_size"]
+            cs = cs[:, pad:, :]
+            bp = bp[:, pad:, :]
+        preds, tgts, clss = [], [], []
+        batch_idx_list: list[int] = []
+        gt_idx_list: list[int] = []
+        bs = cs.size(0)
+        for b in range(bs):
+            if b >= len(gt_ttc_list) or b >= len(gt_bboxes_list) or b >= len(gt_labels_list):
+                continue
+            gt_ttc = gt_ttc_list[b]
+            if gt_ttc is None:
+                continue
+            if not isinstance(gt_ttc, torch.Tensor):
+                gt_ttc = torch.as_tensor(gt_ttc, device=cs.device)
+            elif gt_ttc.device != cs.device:
+                gt_ttc = gt_ttc.to(cs.device)
+            if gt_ttc.numel() == 0:
+                continue
+            qf_b = qf[b]
+            cls_i = cs[b]
+            box_i = bp[b]
+            # Match ``loss()`` (lines 1110–1112): assigner expects tensors, not LiDARInstance3DBoxes.
+            gt_bb = gt_bboxes_list[b]
+            if isinstance(gt_bb, torch.Tensor):
+                gt_bb_t = gt_bb.to(cls_i.device)
+            else:
+                gt_bb_t = torch.cat(
+                    (gt_bb.gravity_center, gt_bb.tensor[:, 3:]),
+                    dim=1,
+                ).to(cls_i.device)
+            assign = self.assigner.assign(
+                box_i,
+                cls_i,
+                gt_bb_t,
+                gt_labels_list[b],
+                None,
+                self.match_costs,
+                self.match_with_velo,
+            )
+            sampling = self.sampler.sample(assign, box_i, gt_bb_t)
+            if sampling.num_gts == 0:
+                continue
+            pos = sampling.pos_inds
+            gt_ix = sampling.pos_assigned_gt_inds
+            pred = self.ttc_head(qf_b[pos].detach())
+            tgt = gt_ttc[gt_ix]
+            m = torch.isfinite(tgt) & (tgt >= 0)
+            if not m.any():
+                continue
+            pred = pred[m]
+            tgt = tgt[m]
+            gt_ix_m = gt_ix[m]
+            gt_lab = gt_labels_list[b][gt_ix_m]
+            preds.append(pred.detach().cpu())
+            tgts.append(tgt.detach().cpu())
+            clss.append(gt_lab.detach().cpu().long())
+            if return_gt_indices:
+                gix_flat = gt_ix_m.reshape(-1)
+                for k in range(pred.numel()):
+                    batch_idx_list.append(b)
+                    gt_idx_list.append(int(gix_flat[k].item()))
+        if not preds:
+            return None
+        out = {
+            "pred": torch.cat(preds),
+            "tgt": torch.cat(tgts),
+            "cls": torch.cat(clss),
+        }
+        if return_gt_indices:
+            out["batch_idx"] = torch.tensor(batch_idx_list, dtype=torch.long)
+            out["gt_idx"] = torch.tensor(gt_idx_list, dtype=torch.long)
+        return out
+
+    @staticmethod
+    def _physics_ttc_bev_lidar(cx, cy, vx, vy, ttc_cap=10.0, min_closing=0.5):
+        """Closing-time TTC in BEV with ego at lidar origin (same recipe as ``tools/ttc_utils.compute_ttc_xy_global``)."""
+        import math
+
+        dist = math.hypot(cx, cy)
+        if dist < 1e-6:
+            return None
+        rx, ry = cx / dist, cy / dist
+        closing = -(vx * rx + vy * ry)
+        if closing < min_closing or not math.isfinite(closing):
+            return None
+        ttc = min(dist / closing, ttc_cap)
+        if not math.isfinite(ttc):
+            return None
+        return float(ttc)
+
+    def ttc_pairwise_physics_from_preds(
+        self,
+        preds_dicts,
+        gt_bboxes_list,
+        gt_labels_list,
+        gt_ttc_list,
+        return_gt_indices=False,
+        ttc_cap=10.0,
+        min_closing_speed=0.5,
+    ):
+        """Same matching as ``loss_ttc`` / ``ttc_pairwise_errors``; pred = BEV physics TTC from **predicted** bbox.
+
+        Uses horizontal (vx, vy) from the regression head (lidar frame, ego at origin), matching
+        ``projects.mmdet3d_plugin.core.bbox.util.normalize_bbox`` / nuScenes training targets.
+        """
+        if preds_dicts is None or preds_dicts.get("all_bbox_preds") is None:
+            return None
+        cs = preds_dicts["all_cls_scores"][-1]
+        bp = preds_dicts["all_bbox_preds"][-1]
+        if preds_dicts.get("dn_mask_dict") is not None:
+            pad = preds_dicts["dn_mask_dict"]["pad_size"]
+            cs = cs[:, pad:, :]
+            bp = bp[:, pad:, :]
+        preds, tgts, clss = [], [], []
+        batch_idx_list: list[int] = []
+        gt_idx_list: list[int] = []
+        bs = cs.size(0)
+        for b in range(bs):
+            if b >= len(gt_ttc_list) or b >= len(gt_bboxes_list) or b >= len(gt_labels_list):
+                continue
+            gt_ttc = gt_ttc_list[b]
+            if gt_ttc is None:
+                continue
+            if not isinstance(gt_ttc, torch.Tensor):
+                gt_ttc = torch.as_tensor(gt_ttc, device=cs.device)
+            elif gt_ttc.device != cs.device:
+                gt_ttc = gt_ttc.to(cs.device)
+            if gt_ttc.numel() == 0:
+                continue
+            cls_i = cs[b]
+            box_i = bp[b]
+            gt_bb = gt_bboxes_list[b]
+            if isinstance(gt_bb, torch.Tensor):
+                gt_bb_t = gt_bb.to(cls_i.device)
+            else:
+                gt_bb_t = torch.cat(
+                    (gt_bb.gravity_center, gt_bb.tensor[:, 3:]),
+                    dim=1,
+                ).to(cls_i.device)
+            assign = self.assigner.assign(
+                box_i,
+                cls_i,
+                gt_bb_t,
+                gt_labels_list[b],
+                None,
+                self.match_costs,
+                self.match_with_velo,
+            )
+            sampling = self.sampler.sample(assign, box_i, gt_bb_t)
+            if sampling.num_gts == 0:
+                continue
+            pos = sampling.pos_inds
+            gt_ix = sampling.pos_assigned_gt_inds
+            tgt = gt_ttc[gt_ix]
+            m = torch.isfinite(tgt) & (tgt >= 0)
+            if not m.any():
+                continue
+            tgt = tgt[m]
+            gt_ix_m = gt_ix[m]
+            matched = box_i[pos][m]
+            gt_lab = gt_labels_list[b][gt_ix_m]
+            for j in range(matched.size(0)):
+                row = matched[j]
+                cx = float(row[0].item())
+                cy = float(row[1].item())
+                if row.numel() > 9:
+                    vx = float(row[8].item())
+                    vy = float(row[9].item())
+                else:
+                    vx, vy = 0.0, 0.0
+                if not all(
+                    map(
+                        lambda x: x == x
+                        and abs(x) < 1e30,
+                        (cx, cy, vx, vy),
+                    )
+                ):
+                    continue
+                pt = self._physics_ttc_bev_lidar(
+                    cx,
+                    cy,
+                    vx,
+                    vy,
+                    ttc_cap=ttc_cap,
+                    min_closing=min_closing_speed,
+                )
+                if pt is None:
+                    continue
+                preds.append(torch.tensor(pt, dtype=torch.float32))
+                tgts.append(tgt[j].detach().cpu())
+                clss.append(gt_lab[j].detach().cpu().long())
+                if return_gt_indices:
+                    batch_idx_list.append(b)
+                    gt_idx_list.append(int(gt_ix_m[j].item()))
+        if not preds:
+            return None
+        out = {
+            "pred": torch.stack(preds),
+            "tgt": torch.stack(tgts),
+            "cls": torch.stack(clss),
+        }
+        if return_gt_indices:
+            out["batch_idx"] = torch.tensor(batch_idx_list, dtype=torch.long)
+            out["gt_idx"] = torch.tensor(gt_idx_list, dtype=torch.long)
+        return out
+
     @force_fp32(apply_to=('preds_dicts'))
     def loss(self,
              gt_bboxes_list,
              gt_labels_list,
              preds_dicts,
-             gt_bboxes_ignore=None):
+             gt_bboxes_ignore=None,
+             gt_ttc_list=None):
         """"Loss function.
         Args:
             gt_bboxes_list (list[Tensor]): Ground truth bboxes for each image
@@ -1009,7 +1333,24 @@ class StreamPETRHead(AnchorFreeHead):
                                             dn_losses_bbox[:-1]):
                 loss_dict[f'd{num_dec_layer}.dn_loss_cls'] = loss_cls_i.detach()     
                 loss_dict[f'd{num_dec_layer}.dn_loss_bbox'] = loss_bbox_i.detach()     
-                num_dec_layer += 1
+            num_dec_layer += 1
+
+        if (
+            self.ttc_head is not None
+            and gt_ttc_list is not None
+            and preds_dicts.get('ttc_query_feats') is not None
+        ):
+            cs = preds_dicts['all_cls_scores'][-1]
+            bp = preds_dicts['all_bbox_preds'][-1]
+            qf = preds_dicts['ttc_query_feats']
+            if preds_dicts['dn_mask_dict'] is not None:
+                pad = preds_dicts['dn_mask_dict']['pad_size']
+                cs = cs[:, pad:, :]
+                bp = bp[:, pad:, :]
+            loss_dict['loss_ttc'] = (
+                self.loss_ttc_weight
+                * self.loss_ttc(cs, bp, qf, gt_bboxes_list, gt_labels_list, gt_ttc_list)
+            )
 
         return loss_dict
 

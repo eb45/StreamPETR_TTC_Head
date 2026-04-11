@@ -1,0 +1,102 @@
+_wandb:
+    value:
+        cli_version: 0.24.2
+        e:
+            2ptx8q390ec8q6p22h0te5xx89yjcmoc:
+                args:
+                    - projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e.py
+                    - --work-dir
+                    - ./work_dirs/streampetr_ttc_frozen_20e
+                    - --launcher
+                    - none
+                codePath: tools/train.py
+                codePathLocal: tools/train.py
+                cpu_count: 96
+                cpu_count_logical: 192
+                cudaVersion: "12.8"
+                disk:
+                    /:
+                        total: "105089261568"
+                        used: "24763174912"
+                email: eb408@duke.edu
+                executable: /hpc/home/eb408/eb408/CS372/streampetr_env/bin/python
+                git:
+                    commit: 79462cd82b01cdc12bbaf58b62788b726ba5e8f1
+                    remote: https://github.com/eb45/collision-risk-perception.git
+                gpu: NVIDIA H200
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "150754820096"
+                      name: NVIDIA H200
+                      uuid: GPU-0b220d40-9e0e-1cf3-578c-4b018841b77e
+                host: dcc-h200-gpu-06
+                memory:
+                    total: "2164188397568"
+                os: Linux-5.15.0-142-generic-x86_64-with-glibc2.17
+                program: tools/train.py
+                python: CPython 3.8.20
+                root: /hpc/group/naderilab/eb408/CS372/StreamPETR
+                slurm:
+                    cluster_name: dcc
+                    conf: /var/spool/slurmd/conf-cache/slurm.conf
+                    cpus_on_node: "4"
+                    cpus_per_task: "4"
+                    gpus_on_node: "1"
+                    gtids: "0"
+                    job_account: scavenger-h200
+                    job_cpus_per_node: "4"
+                    job_end_time: "1775842728"
+                    job_gid: "1000000"
+                    job_gpus: "6"
+                    job_id: "45314400"
+                    job_name: streampetr_ttc_phase3
+                    job_nodelist: dcc-h200-gpu-06
+                    job_num_nodes: "1"
+                    job_partition: scavenger-h200
+                    job_qos: normal
+                    job_start_time: "1775756328"
+                    job_uid: "1512195"
+                    job_user: eb408
+                    jobid: "45314400"
+                    localid: "0"
+                    mem_per_node: "32768"
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: dcc-h200-gpu-06
+                    oom_kill_step: "0"
+                    prio_process: "0"
+                    procid: "0"
+                    submit_dir: /hpc/group/naderilab/eb408/CS372/StreamPETR
+                    submit_host: dcc-login-03
+                    task_pid: "770732"
+                    tasks_per_node: "1"
+                    topology_addr: dcc-h200-gpu-06
+                    topology_addr_pattern: node
+                    tres_per_task: cpu=4
+                startedAt: "2026-04-09T17:53:45.841982Z"
+                writerId: 2ptx8q390ec8q6p22h0te5xx89yjcmoc
+        m: []
+        python_version: 3.8.20
+        t:
+            "1":
+                - 1
+                - 5
+                - 37
+                - 38
+                - 41
+                - 53
+                - 60
+            "2":
+                - 1
+                - 5
+                - 37
+                - 38
+                - 41
+                - 53
+                - 60
+            "4": 3.8.20
+            "5": 0.24.2
+            "12": 0.24.2
+            "13": linux-x86_64

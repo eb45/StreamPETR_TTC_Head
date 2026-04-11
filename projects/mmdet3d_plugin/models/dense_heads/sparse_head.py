@@ -15,6 +15,7 @@ from projects.mmdet3d_plugin.models.utils.positional_encoding import pos2posemb3
 from projects.mmdet3d_plugin.models.utils.misc import MLN, topk_gather, transform_reference_points, memory_refresh, SELayer_Linear
 import copy
 from mmdet.models.utils import NormedLinear
+from projects.mmdet3d_plugin.models.dense_heads.dn_utils import gt_boxes_for_dn, gt_labels_for_dn
 
 @HEADS.register_module()
 class SparseHead(AnchorFreeHead):
@@ -277,8 +278,13 @@ class SparseHead(AnchorFreeHead):
 
     def prepare_for_dn(self, batch_size, reference_points, img_metas):
         if self.training and self.with_dn:
-            targets = [torch.cat((img_meta['gt_bboxes_3d']._data.gravity_center, img_meta['gt_bboxes_3d']._data.tensor[:, 3:]),dim=1) for img_meta in img_metas ]
-            labels = [img_meta['gt_labels_3d']._data for img_meta in img_metas ]
+            targets = []
+            labels = []
+            for img_meta in img_metas:
+                box = gt_boxes_for_dn(img_meta)
+                n = int(box.tensor.shape[0])
+                labels.append(gt_labels_for_dn(img_meta, num_boxes=n))
+                targets.append(torch.cat((box.gravity_center, box.tensor[:, 3:]), dim=1))
             known = [(torch.ones_like(t)).cuda() for t in labels]
             know_idx = known
             unmask_bbox = unmask_label = torch.cat(known)

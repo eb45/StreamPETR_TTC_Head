@@ -1,0 +1,32 @@
+Traceback (most recent call last):
+  File "tools/train.py", line 263, in <module>
+    main()
+  File "tools/train.py", line 251, in main
+    custom_train_model(
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/core/apis/train.py", line 30, in custom_train_model
+    custom_train_detector(
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/core/apis/mmdet_train.py", line 203, in custom_train_detector
+    runner.run(data_loaders, cfg.workflow)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/iter_based_runner.py", line 144, in run
+    iter_runner(iter_loaders[i], **kwargs)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/iter_based_runner.py", line 64, in train
+    outputs = self.model.train_step(data_batch, self.optimizer, **kwargs)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/parallel/data_parallel.py", line 77, in train_step
+    return self.module.train_step(*inputs[0], **kwargs[0])
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmdet/models/detectors/base.py", line 248, in train_step
+    losses = self(**data)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/nn/modules/module.py", line 1051, in _call_impl
+    return forward_call(*input, **kwargs)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/fp16_utils.py", line 233, in new_func
+    output = old_func(*new_args, **new_kwargs)
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/models/detectors/petr3d.py", line 231, in forward
+    return self.forward_train(**data)
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/models/detectors/petr3d.py", line 276, in forward_train
+    rec_img_feats = self.extract_feat(rec_img, self.num_frame_backbone_grads)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/fp16_utils.py", line 130, in new_func
+    cast_tensor_type(args[i], torch.float, torch.half))
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/fp16_utils.py", line 51, in cast_tensor_type
+    return inputs.to(dst_type) if inputs.dtype == src_type else inputs
+RuntimeError: CUDA error: no kernel image is available for execution on the device
+CUDA kernel errors might be asynchronously reported at some other API call,so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1.

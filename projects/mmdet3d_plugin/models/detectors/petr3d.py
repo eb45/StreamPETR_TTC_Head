@@ -120,16 +120,30 @@ class Petr3D(MVXTwoStageDetector):
             return_losses = False
             data_t = dict()
             for key in data:
-                data_t[key] = data[key][:, i] 
+                # gt_ttc is list-structured after forward()'s zip (per-frame lists), not (B,T,...) tensor.
+                if key == 'gt_ttc':
+                    continue
+                data_t[key] = data[key][:, i]
 
             data_t['img_feats'] = data_t['img_feats']
             if i >= num_nograd_frames:
                 requires_grad = True
             if i >= num_grad_losses:
                 return_losses = True
-            loss = self.forward_pts_train(gt_bboxes_3d[i],
-                                        gt_labels_3d[i], gt_bboxes[i],
-                                        gt_labels[i], img_metas[i], centers2d[i], depths[i], requires_grad=requires_grad,return_losses=return_losses,**data_t)
+            gt_ttc_i = data['gt_ttc'][i] if 'gt_ttc' in data else None
+            loss = self.forward_pts_train(
+                gt_bboxes_3d[i],
+                gt_labels_3d[i],
+                gt_bboxes[i],
+                gt_labels[i],
+                img_metas[i],
+                centers2d[i],
+                depths[i],
+                requires_grad=requires_grad,
+                return_losses=return_losses,
+                gt_ttc=gt_ttc_i,
+                **data_t,
+            )
             if loss is not None:
                 for key, value in loss.items():
                     losses['frame_'+str(i)+"_"+key] = value
@@ -161,6 +175,7 @@ class Petr3D(MVXTwoStageDetector):
                           depths,
                           requires_grad=True,
                           return_losses=False,
+                          gt_ttc=None,
                           **data):
         """Forward function for point cloud branch.
         Args:
@@ -188,16 +203,17 @@ class Petr3D(MVXTwoStageDetector):
             topk_indexes = outs_roi['topk_indexes']
             outs = self.pts_bbox_head(location, img_metas, topk_indexes, **data)
 
-        if return_losses:
-            loss_inputs = [gt_bboxes_3d, gt_labels_3d, outs]
-            losses = self.pts_bbox_head.loss(*loss_inputs)
-            if self.with_img_roi_head:
-                loss2d_inputs = [gt_bboxes, gt_labels, centers2d, depths, outs_roi, img_metas]
-                losses2d = self.img_roi_head.loss(*loss2d_inputs)
-                losses.update(losses2d) 
-
-            return losses
-        else:
+            if return_losses:
+                loss_inputs = [gt_bboxes_3d, gt_labels_3d, outs]
+                gt_ttc_kw = {}
+                if gt_ttc is not None:
+                    gt_ttc_kw['gt_ttc_list'] = list(gt_ttc)
+                losses = self.pts_bbox_head.loss(*loss_inputs, **gt_ttc_kw)
+                if self.with_img_roi_head:
+                    loss2d_inputs = [gt_bboxes, gt_labels, centers2d, depths, outs_roi, img_metas]
+                    losses2d = self.img_roi_head.loss(*loss2d_inputs)
+                    losses.update(losses2d)
+                return losses
             return None
 
     @force_fp32(apply_to=('img'))
@@ -212,8 +228,9 @@ class Petr3D(MVXTwoStageDetector):
         augmentations.
         """
         if return_loss:
-            for key in ['gt_bboxes_3d', 'gt_labels_3d', 'gt_bboxes', 'gt_labels', 'centers2d', 'depths', 'img_metas']:
-                data[key] = list(zip(*data[key]))
+            for key in ['gt_bboxes_3d', 'gt_labels_3d', 'gt_bboxes', 'gt_labels', 'centers2d', 'depths', 'img_metas', 'gt_ttc']:
+                if key in data:
+                    data[key] = list(zip(*data[key]))
             return self.forward_train(**data)
         else:
             return self.forward_test(**data)
@@ -270,9 +287,17 @@ class Petr3D(MVXTwoStageDetector):
         else:
             data['img_feats'] = rec_img_feats
 
-        losses = self.obtain_history_memory(gt_bboxes_3d,
-                        gt_labels_3d, gt_bboxes,
-                        gt_labels, img_metas, centers2d, depths, gt_bboxes_ignore, **data)
+        losses = self.obtain_history_memory(
+            gt_bboxes_3d,
+            gt_labels_3d,
+            gt_bboxes,
+            gt_labels,
+            img_metas,
+            centers2d,
+            depths,
+            gt_bboxes_ignore,
+            **data,
+        )
 
         return losses
   

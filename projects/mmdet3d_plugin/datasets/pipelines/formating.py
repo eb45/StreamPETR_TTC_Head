@@ -73,6 +73,8 @@ class PETRFormatBundle3D(DefaultFormatBundle):
                         gt_bboxes_3d_mask]
                 if 'depths' in results:
                     results['depths'] = results['depths'][gt_bboxes_3d_mask]
+                if 'gt_ttc' in results:
+                    results['gt_ttc'] = results['gt_ttc'][gt_bboxes_3d_mask]
             if 'gt_bboxes_mask' in results:
                 gt_bboxes_mask = results['gt_bboxes_mask']
                 if 'gt_bboxes' in results:
@@ -103,6 +105,10 @@ class PETRFormatBundle3D(DefaultFormatBundle):
                     ],
                                                        dtype=np.int64)
         results = super(PETRFormatBundle3D, self).__call__(results)
+        if 'gt_ttc' in results:
+            results['gt_ttc'] = DC(
+                to_tensor(np.asarray(results['gt_ttc'], dtype=np.float32)), cpu_only=False
+            )
         return results
 
     def __repr__(self):

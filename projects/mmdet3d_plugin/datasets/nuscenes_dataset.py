@@ -136,7 +136,9 @@ class CustomNuScenesDataset(NuScenesDataset):
             else:
                 queue[-1][key] = DC([each[key].data for each in queue], cpu_only=True)
         if not self.test_mode:
-            for key in ['gt_bboxes_3d', 'gt_labels_3d', 'gt_bboxes', 'gt_labels', 'centers2d', 'depths']:
+            for key in ['gt_bboxes_3d', 'gt_labels_3d', 'gt_bboxes', 'gt_labels', 'centers2d', 'depths', 'gt_ttc']:
+                if key not in queue[0]:
+                    continue
                 if key == 'gt_bboxes_3d':
                     queue[-1][key] = DC([each[key].data for each in queue], cpu_only=True)
                 else:
