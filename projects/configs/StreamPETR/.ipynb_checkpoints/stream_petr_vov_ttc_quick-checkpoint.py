@@ -21,6 +21,7 @@ num_epochs = 6
 
 num_iters_per_epoch = 28130 // (num_gpus * batch_size)
 
-evaluation = dict(interval=num_iters_per_epoch, pipeline=test_pipeline)
+# Deep-merge with base for evaluation (keep pipeline from base; mmcv child exec has no test_pipeline).
+evaluation = dict(interval=num_iters_per_epoch)
 checkpoint_config = dict(interval=num_iters_per_epoch, max_keep_ckpts=3)
 runner = dict(type='IterBasedRunner', max_iters=num_epochs * num_iters_per_epoch)

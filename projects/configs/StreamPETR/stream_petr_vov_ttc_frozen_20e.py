@@ -121,13 +121,22 @@ train_pipeline = [
                     'gt_bboxes_3d', 'gt_labels_3d')),
 ]
 
+# TTC loss: extra weight on GT TTC < 1 s (critical) and < 3 s (urgent) to match safety-critical metrics.
 model = dict(
     pts_bbox_head=dict(
-        ttc_head=dict(embed_dims=256, hidden_dim=256, num_layers=0, dropout=0.1, ttc_max=10.0),
+        ttc_head=dict(
+            embed_dims=256,
+            hidden_dim=384,
+            num_layers=1,
+            dropout=0.15,
+            ttc_max=10.0,
+        ),
         loss_ttc_weight=1.0,
+        ttc_crit_thresh_s=1.0,
+        ttc_crit_weight=10.0,
         ttc_low_thresh_s=3.0,
-        ttc_low_weight=3.0,
-        ttc_smooth_beta=1.0,
+        ttc_low_weight=5.0,
+        ttc_smooth_beta=0.5,
         dn_weight=0.0,
         loss_cls=dict(
             type='FocalLoss',

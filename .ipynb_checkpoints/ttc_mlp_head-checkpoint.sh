@@ -135,7 +135,8 @@ else
   echo "[auto-prep] OK  TTC labels pickle: ${STREAMPETR_TTC_PKL}"
 fi
 
-WORK_DIR="${WORK_DIR:-./work_dirs/streampetr_ttc_frozen_20e}"
+# Default output dir for tiered TTC loss + wider MLP (distinct from older streampetr_ttc_frozen_20e runs).
+WORK_DIR="${WORK_DIR:-./work_dirs/streampetr_ttc_frozen_20e_tiered}"
 RUN_TRAIN_CURVE_PLOT="${RUN_TRAIN_CURVE_PLOT:-1}"
 RUN_TTC_BEV="${RUN_TTC_BEV:-0}"
 TTC_BEV_OUT="${TTC_BEV_OUT:-${WORK_DIR}/ttc_bev_gt}"

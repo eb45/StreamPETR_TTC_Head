@@ -113,6 +113,8 @@ class StreamPETRHead(AnchorFreeHead):
                  loss_ttc_weight=2.0,
                  ttc_low_thresh_s=3.0,
                  ttc_low_weight=3.0,
+                 ttc_crit_thresh_s=0.0,
+                 ttc_crit_weight=1.0,
                  ttc_smooth_beta=1.0,
                  **kwargs):
         # NOTE here use `AnchorFreeHead` instead of `TransformerHead`,
@@ -195,6 +197,8 @@ class StreamPETRHead(AnchorFreeHead):
         self.loss_ttc_weight = loss_ttc_weight
         self.ttc_low_thresh_s = ttc_low_thresh_s
         self.ttc_low_weight = ttc_low_weight
+        self.ttc_crit_thresh_s = ttc_crit_thresh_s
+        self.ttc_crit_weight = ttc_crit_weight
         self.ttc_smooth_beta = ttc_smooth_beta
 
         self.act_cfg = transformer.get('act_cfg',
@@ -940,6 +944,28 @@ class StreamPETRHead(AnchorFreeHead):
         loss_bbox = torch.nan_to_num(loss_bbox)
         
         return self.dn_weight * loss_cls, self.dn_weight * loss_bbox
+
+    def _ttc_gt_weights(self, tgt: torch.Tensor) -> torch.Tensor:
+        """Higher weight for lower GT TTC (more safety-critical).
+
+        If ``ttc_crit_thresh_s`` > 0: ``tgt < crit`` → ``ttc_crit_weight``;
+        ``crit <= tgt < ttc_low_thresh_s`` → ``ttc_low_weight``; else 1.
+        If ``ttc_crit_thresh_s`` <= 0: same as before (only ``ttc_low_thresh_s`` / ``ttc_low_weight``).
+        """
+        one = torch.ones_like(tgt, dtype=tgt.dtype)
+        lt = float(self.ttc_low_thresh_s)
+        lw = float(self.ttc_low_weight)
+        crit = float(self.ttc_crit_thresh_s)
+        if crit > 0.0:
+            cw = float(self.ttc_crit_weight)
+            if crit >= lt:
+                return torch.where(tgt < lt, torch.full_like(tgt, lw), one)
+            return torch.where(
+                tgt < crit,
+                torch.full_like(tgt, cw),
+                torch.where(tgt < lt, torch.full_like(tgt, lw), one),
+            )
+        return torch.where(tgt < lt, torch.full_like(tgt, lw), one)
     
     def loss_ttc(
         self,
@@ -989,7 +1015,7 @@ class StreamPETRHead(AnchorFreeHead):
             pred = pred[m]
             tgt = tgt[m]
             err = torch.nn.functional.smooth_l1_loss(pred, tgt, beta=self.ttc_smooth_beta, reduction='none')
-            w = torch.where(tgt < self.ttc_low_thresh_s, self.ttc_low_weight, 1.0).to(pred.dtype)
+            w = self._ttc_gt_weights(tgt).to(pred.dtype)
             total = total + (err * w).sum()
             denom = denom + w.sum()
         if denom <= 0:
