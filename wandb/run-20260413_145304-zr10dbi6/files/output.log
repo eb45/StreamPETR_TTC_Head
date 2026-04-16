@@ -1,0 +1,46 @@
+Traceback (most recent call last):
+  File "tools/train.py", line 263, in <module>
+    main()
+  File "tools/train.py", line 251, in main
+    custom_train_model(
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/core/apis/train.py", line 30, in custom_train_model
+    custom_train_detector(
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/core/apis/mmdet_train.py", line 203, in custom_train_detector
+    runner.run(data_loaders, cfg.workflow)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/iter_based_runner.py", line 144, in run
+    iter_runner(iter_loaders[i], **kwargs)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/iter_based_runner.py", line 61, in train
+    data_batch = next(data_loader)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/mmcv/runner/iter_based_runner.py", line 34, in __next__
+    data = next(self.iter_loader)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 521, in __next__
+    data = self._next_data()
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1203, in _next_data
+    return self._process_data(data)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1229, in _process_data
+    data.reraise()
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/_utils.py", line 425, in reraise
+    raise self.exc_type(msg)
+AssertionError: Caught AssertionError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/utils/data/_utils/worker.py", line 287, in _worker_loop
+    data = fetcher.fetch(index)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/datasets/nuscenes_dataset.py", line 255, in __getitem__
+    data = self.prepare_train_data(idx)
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/datasets/nuscenes_dataset.py", line 108, in prepare_train_data
+    example = self.pipeline(input_dict)
+  File "/hpc/group/naderilab/eb408/CS372/StreamPETR/mmdetection3d/mmdet3d/datasets/pipelines/compose.py", line 49, in __call__
+    data = t(data)
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/datasets/pipelines/ttc_pipeline.py", line 126, in __call__
+    cands = self._candidates(sample_token)
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/datasets/pipelines/ttc_pipeline.py", line 56, in _candidates
+    nusc = self._nuscenes()
+  File "/hpc/home/eb408/eb408/CS372/StreamPETR/projects/mmdet3d_plugin/datasets/pipelines/ttc_pipeline.py", line 46, in _nuscenes
+    self._nusc = NuScenes(version=self.nuscenes_version, dataroot=self.data_root, verbose=False)
+  File "/hpc/home/eb408/eb408/CS372/streampetr_env/lib/python3.8/site-packages/nuscenes/nuscenes.py", line 62, in __init__
+    assert osp.exists(self.table_root), 'Database version not found: {}'.format(self.table_root)
+AssertionError: Database version not found: ./data/nuscenes/v1.0-mini

@@ -1,0 +1,123 @@
+_wandb:
+    value:
+        cli_version: 0.24.2
+        e:
+            9a7h7vql0be9tkyehmy8ehmxoyobejpa:
+                args:
+                    - projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e_4gpu.py
+                    - --seed
+                    - "0"
+                    - --launcher
+                    - pytorch
+                    - --work-dir
+                    - ./work_dirs/streampetr_ttc_frozen_20e_tiered_4gpu
+                codePath: tools/train.py
+                codePathLocal: tools/train.py
+                cpu_count: 48
+                cpu_count_logical: 96
+                cudaVersion: "13.1"
+                disk:
+                    /:
+                        total: "107307073536"
+                        used: "16895352832"
+                email: eb408@duke.edu
+                executable: /hpc/home/eb408/eb408/CS372/streampetr_env/bin/python
+                git:
+                    commit: 09e570a7e3858aecf76433220f6ae5debb192a45
+                    remote: https://github.com/eb45/collision-risk-perception.git
+                gpu: NVIDIA GeForce RTX 2080 Ti
+                gpu_count: 4
+                gpu_nvidia:
+                    - architecture: Turing
+                      cudaCores: 4352
+                      memoryTotal: "11811160064"
+                      name: NVIDIA GeForce RTX 2080 Ti
+                      uuid: GPU-e599e47c-3679-9b6b-9f4e-9a686afdc04e
+                    - architecture: Turing
+                      cudaCores: 4352
+                      memoryTotal: "11811160064"
+                      name: NVIDIA GeForce RTX 2080 Ti
+                      uuid: GPU-c5499df6-cff7-3cdd-1f06-61c3af65cb2d
+                    - architecture: Turing
+                      cudaCores: 4352
+                      memoryTotal: "11811160064"
+                      name: NVIDIA GeForce RTX 2080 Ti
+                      uuid: GPU-f57029d4-0582-fdea-da43-a307ca3b45a5
+                    - architecture: Turing
+                      cudaCores: 4352
+                      memoryTotal: "11811160064"
+                      name: NVIDIA GeForce RTX 2080 Ti
+                      uuid: GPU-a0f1cba6-692c-e8b1-a642-e0f4c8fc3f0e
+                host: dcc-dhvimdcore-gpu-ferc-s-o15-7
+                memory:
+                    total: "809642872832"
+                os: Linux-5.14.0-611.13.1.el9_7.x86_64-x86_64-with-glibc2.17
+                program: tools/train.py
+                python: CPython 3.8.20
+                root: /hpc/group/naderilab/eb408/CS372/StreamPETR
+                slurm:
+                    cluster_name: dcc
+                    conf: /var/spool/slurmd/conf-cache/slurm.conf
+                    cpus_on_node: "16"
+                    cpus_per_task: "16"
+                    gpus_on_node: "4"
+                    gtids: "0"
+                    job_account: naderilab
+                    job_cpus_per_node: "16"
+                    job_end_time: "1776106795"
+                    job_gid: "1000000"
+                    job_gpus: 0,1,2,3
+                    job_id: "45390377"
+                    job_name: streampetr_ttc_p3_4gpu
+                    job_nodelist: dcc-dhvimdcore-gpu-ferc-s-o15-7
+                    job_num_nodes: "1"
+                    job_partition: common
+                    job_qos: normal
+                    job_start_time: "1776020395"
+                    job_uid: "1512195"
+                    job_user: eb408
+                    jobid: "45390377"
+                    localid: "0"
+                    mem_per_node: "65536"
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: dcc-dhvimdcore-gpu-ferc-s-o15-7
+                    oom_kill_step: "0"
+                    prio_process: "0"
+                    procid: "0"
+                    submit_dir: /hpc/group/naderilab/eb408/CS372/StreamPETR
+                    submit_host: dcc-login-03
+                    task_pid: "1606067"
+                    tasks_per_node: "1"
+                    topology_addr: dcc-dhvimdcore-gpu-ferc-s-o15-7
+                    topology_addr_pattern: node
+                    tres_per_task: cpu=16
+                startedAt: "2026-04-12T19:00:41.399533Z"
+                writerId: 9a7h7vql0be9tkyehmy8ehmxoyobejpa
+        m: []
+        python_version: 3.8.20
+        t:
+            "1":
+                - 1
+                - 5
+                - 37
+                - 38
+                - 41
+                - 53
+                - 60
+            "2":
+                - 1
+                - 5
+                - 37
+                - 38
+                - 41
+                - 53
+                - 60
+            "3":
+                - 61
+            "4": 3.8.20
+            "5": 0.24.2
+            "8":
+                - 2
+            "12": 0.24.2
+            "13": linux-x86_64

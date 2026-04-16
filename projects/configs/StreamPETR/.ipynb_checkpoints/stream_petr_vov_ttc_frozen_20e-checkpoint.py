@@ -14,6 +14,17 @@ import os
 
 _base_ = ['./stream_petr_vov_flash_800_bs2_seq_24e.py']
 
+# nuScenes root for images + DB tables. Match ttc_mlp_head.sh (export NUSCENES_ROOT=...).
+_dr = os.environ.get('NUSCENES_ROOT', '').strip()
+data_root = _dr if _dr else './data/nuscenes/'
+if not data_root.endswith('/'):
+    data_root = data_root + '/'
+# NuScenes devkit expects v1.0-mini | v1.0-trainval | v1.0-test (not the shorthand v1.0).
+_nv = os.environ.get('NUSCENES_VER', 'v1.0-trainval').strip()
+if _nv == 'v1.0':
+    _nv = 'v1.0-trainval'
+nuscenes_version = _nv
+
 # Must be set here — mmcv can execute this file before base names exist.
 # Default is **1 GPU** (typical workstation / single Slurm GPU). For 8× GPU training, use e.g.
 #   --cfg-options num_gpus=8 num_iters_per_epoch=1758 runner.max_iters=35160 ...
@@ -29,7 +40,6 @@ class_names = [
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone']
 collect_keys = [
     'lidar2img', 'intrinsics', 'extrinsics', 'timestamp', 'img_timestamp', 'ego_pose', 'ego_pose_inv']
-data_root = './data/nuscenes/'
 ida_aug_conf = {
     'resize_lim': (0.47, 0.625),
     'final_dim': (320, 800),
@@ -103,6 +113,7 @@ train_pipeline = [
         point_cloud_range=point_cloud_range,
         ann_file=data_root + 'nuscenes2d_temporal_infos_train.pkl',
         data_root=data_root,
+        nuscenes_version=nuscenes_version,
     ),
     dict(type='ResizeCropFlipRotImage', data_aug_conf=ida_aug_conf, training=True),
     dict(type='GlobalRotScaleTransImage',
@@ -121,22 +132,23 @@ train_pipeline = [
                     'gt_bboxes_3d', 'gt_labels_3d')),
 ]
 
-# TTC loss: extra weight on GT TTC < 1 s (critical) and < 3 s (urgent) to match safety-critical metrics.
+# TTC loss: original single threshold (GT TTC < ttc_low_thresh_s → ttc_low_weight). Tiered
+# critical/urgent weights are disabled (ttc_crit_thresh_s=0 in StreamPETRHead).
 model = dict(
     pts_bbox_head=dict(
         ttc_head=dict(
             embed_dims=256,
-            hidden_dim=384,
-            num_layers=1,
-            dropout=0.15,
+            hidden_dim=256,
+            num_layers=0,
+            dropout=0.1,
             ttc_max=10.0,
         ),
         loss_ttc_weight=1.0,
-        ttc_crit_thresh_s=1.0,
-        ttc_crit_weight=10.0,
+        ttc_crit_thresh_s=0.0,
+        ttc_crit_weight=1.0,
         ttc_low_thresh_s=3.0,
-        ttc_low_weight=5.0,
-        ttc_smooth_beta=0.5,
+        ttc_low_weight=3.0,
+        ttc_smooth_beta=1.0,
         dn_weight=0.0,
         loss_cls=dict(
             type='FocalLoss',
@@ -191,4 +203,15 @@ custom_hooks = [
 load_from = os.environ.get(
     'STREAMPETR_LOAD_FROM', 'ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth')
 
-data = dict(train=dict(pipeline=train_pipeline))
+# Merge with base: keep ann_file/data_root consistent with LoadGTTC (env NUSCENES_ROOT at parse time).
+# Each worker loads nuScenes + TTC pickle state — high RAM. Default 2 workers; set WORKERS_PER_GPU=0
+# (main process only) or 1 if Slurm still OOM-kills workers.
+_workers = int(os.environ.get("WORKERS_PER_GPU") or "2")
+data = dict(
+    workers_per_gpu=_workers,
+    train=dict(
+        pipeline=train_pipeline,
+        data_root=data_root,
+        ann_file=data_root + 'nuscenes2d_temporal_infos_train.pkl',
+    ),
+)

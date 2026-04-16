@@ -1353,19 +1353,18 @@ class StreamPETRHead(AnchorFreeHead):
                 all_gt_bboxes_list, all_gt_labels_list, 
                 all_gt_bboxes_ignore_list)
             loss_dict['dn_loss_cls'] = dn_losses_cls[-1].detach()
-            loss_dict['dn_loss_bbox'] = dn_losses_bbox[-1].detach()     
+            loss_dict['dn_loss_bbox'] = dn_losses_bbox[-1].detach()
             num_dec_layer = 0
             for loss_cls_i, loss_bbox_i in zip(dn_losses_cls[:-1],
                                             dn_losses_bbox[:-1]):
-                loss_dict[f'd{num_dec_layer}.dn_loss_cls'] = loss_cls_i.detach()     
-                loss_dict[f'd{num_dec_layer}.dn_loss_bbox'] = loss_bbox_i.detach()     
-            num_dec_layer += 1
+                loss_dict[f'd{num_dec_layer}.dn_loss_cls'] = loss_cls_i.detach()
+                loss_dict[f'd{num_dec_layer}.dn_loss_bbox'] = loss_bbox_i.detach()
+                num_dec_layer += 1
 
-        if (
-            self.ttc_head is not None
-            and gt_ttc_list is not None
-            and preds_dicts.get('ttc_query_feats') is not None
-        ):
+        # DDP requires the same loss keys on every rank. `petr3d.forward_pts_train` may omit
+        # `gt_ttc_list` when `gt_ttc` is missing for a frame; still register `loss_ttc` so
+        # ranks with empty/missing TTC use the zero dummy path inside `loss_ttc`.
+        if self.ttc_head is not None and preds_dicts.get('ttc_query_feats') is not None:
             cs = preds_dicts['all_cls_scores'][-1]
             bp = preds_dicts['all_bbox_preds'][-1]
             qf = preds_dicts['ttc_query_feats']
@@ -1373,9 +1372,16 @@ class StreamPETRHead(AnchorFreeHead):
                 pad = preds_dicts['dn_mask_dict']['pad_size']
                 cs = cs[:, pad:, :]
                 bp = bp[:, pad:, :]
+            bs = int(cs.size(0))
+            if gt_ttc_list is None:
+                gt_ttc_norm = [None] * bs
+            else:
+                gt_ttc_norm = list(gt_ttc_list)
+                if len(gt_ttc_norm) < bs:
+                    gt_ttc_norm = gt_ttc_norm + [None] * (bs - len(gt_ttc_norm))
             loss_dict['loss_ttc'] = (
                 self.loss_ttc_weight
-                * self.loss_ttc(cs, bp, qf, gt_bboxes_list, gt_labels_list, gt_ttc_list)
+                * self.loss_ttc(cs, bp, qf, gt_bboxes_list, gt_labels_list, gt_ttc_norm)
             )
 
         return loss_dict

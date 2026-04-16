@@ -50,9 +50,19 @@ def parse_args():
     p.add_argument("config", help="Phase 3 config")
     p.add_argument("checkpoint", help="Checkpoint .pth")
     p.add_argument("--ann-file", required=True, help="Temporal infos pkl")
-    p.add_argument("--max-batches", type=int, default=50)
+    p.add_argument(
+        "--max-batches",
+        type=int,
+        default=50,
+        help="Batches to aggregate (default 50). Use 0 for the **entire** val dataloader.",
+    )
     p.add_argument("--gpu-id", type=int, default=0)
     p.add_argument("--ttc-pkl", default=None)
+    p.add_argument(
+        "--data-root",
+        default=None,
+        help="nuScenes root (samples/). Overrides cfg.data.train.data_root and LoadGTTC paths when set.",
+    )
     p.add_argument(
         "--save-dir",
         default=None,
@@ -130,15 +140,25 @@ def run_breakdown(model, data_loader, device_id: int, class_names: list[str], ma
     tgt_all: list[np.ndarray] = []
     cls_all: list[np.ndarray] = []
 
+    # Why we skipped (helps debug "no TTC pairs collected")
+    n_skip_no_feats = 0
+    n_skip_no_gt_ttc = 0
+    n_skip_pw_none = 0
+    n_frames_seen = 0
+
     model.train()
     n_batch = 0
     with torch.no_grad():
         for bi, data in enumerate(data_loader):
-            if bi >= max_batches:
+            if max_batches > 0 and bi >= max_batches:
                 break
             data = scatter(data, [device_id])[0]
             if hasattr(head, "reset_memory"):
                 head.reset_memory()
+            # MMDataParallel may pop/mutate the batch dict during forward — read T before calling the model.
+            if "img" not in data:
+                raise RuntimeError("eval_ttc_breakdown: batch has no 'img' after scatter (check dataloader).")
+            T = int(_unwrap_dc(data["img"]).size(1))
             outs_frames: list = []
 
             def _hook(_m, _inp, out):
@@ -146,20 +166,22 @@ def run_breakdown(model, data_loader, device_id: int, class_names: list[str], ma
 
             handle = det.pts_bbox_head.register_forward_hook(_hook)
             try:
-                model(return_loss=True, **data)
+                # Pre-scattered batch: call ``module`` directly (see eval_ttc_mlp._run_eval).
+                model.module(return_loss=True, **data)
             finally:
                 handle.remove()
-
-            T = int(data["img"].size(1))
             start_f = max(0, T - num_frame_losses)
             for i in range(start_f, T):
                 if i >= len(outs_frames):
                     break
+                n_frames_seen += 1
                 outs = outs_frames[i]
                 if outs is None or outs.get("ttc_query_feats") is None:
+                    n_skip_no_feats += 1
                     continue
                 gt_ttc_i = data["gt_ttc"][i] if "gt_ttc" in data else None
                 if gt_ttc_i is None:
+                    n_skip_no_gt_ttc += 1
                     continue
                 bs = int(outs["all_cls_scores"][-1].size(0))
                 gt_ttc_list = _as_list_len_bs(gt_ttc_i, bs)
@@ -169,6 +191,7 @@ def run_breakdown(model, data_loader, device_id: int, class_names: list[str], ma
                 gt_ll = _as_list_len_bs(gtl, bs)
                 pw = head.ttc_pairwise_errors(outs, gt_bl, gt_ll, gt_ttc_list)
                 if pw is None:
+                    n_skip_pw_none += 1
                     continue
                 pred_all.append(pw["pred"].numpy())
                 tgt_all.append(pw["tgt"].numpy())
@@ -177,7 +200,22 @@ def run_breakdown(model, data_loader, device_id: int, class_names: list[str], ma
             n_batch += 1
 
     if not pred_all:
-        return {"error": "no TTC pairs collected", "n_batches": n_batch}
+        return {
+            "error": "no TTC pairs collected",
+            "n_batches": n_batch,
+            "n_frames_seen": n_frames_seen,
+            "skipped_no_ttc_query_feats": n_skip_no_feats,
+            "skipped_no_gt_ttc": n_skip_no_gt_ttc,
+            "skipped_pairwise_none": n_skip_pw_none,
+            "hint": (
+                "If skipped_pairwise_none is high: matched preds often have no finite GT TTC "
+                "(regenerate ttc_gt_labels for the same nuScenes version as ann_file; ensure "
+                "STREAMPETR_TTC_PKL / --ttc-pkl covers val tokens). "
+                "If skipped_no_ttc_query_feats is high: checkpoint may be missing TTC head weights "
+                "or not a Phase-3 TTC config. "
+                "If n_frames_seen is 0: head forward hooks did not align with num_frame_losses / queue length."
+            ),
+        }
 
     pred = np.concatenate(pred_all)
     tgt = np.concatenate(tgt_all)
@@ -253,7 +291,7 @@ def main():
 
     ttc_pkl = _resolve_ttc_pkl(args.ann_file, args.ttc_pkl)
     print(f"Using GT TTC pickle: {ttc_pkl}")
-    data_cfg = _patch_data_train_ann(cfg, args.ann_file, ttc_pkl)
+    data_cfg = _patch_data_train_ann(cfg, args.ann_file, ttc_pkl, data_root=args.data_root)
     dataset = custom_build_dataset(data_cfg)
     seed = getattr(cfg, "seed", 0)
     data_loader = build_dataloader(
@@ -267,6 +305,11 @@ def main():
         shuffler_sampler=cfg.data.shuffler_sampler,
         nonshuffler_sampler=cfg.data.nonshuffler_sampler,
         runner_type=cfg.runner,
+    )
+    print(
+        f"[eval_ttc_breakdown] val batches: {len(data_loader)}  "
+        f"(using {'ALL' if args.max_batches <= 0 else f'first {args.max_batches}'})",
+        flush=True,
     )
 
     model = build_model(cfg.model, train_cfg=cfg.get("train_cfg"), test_cfg=cfg.get("test_cfg"))

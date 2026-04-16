@@ -120,7 +120,12 @@ def parse_args():
         default=None,
         help="If set, also report mean loss after loading only this checkpoint (untrained TTC if keys missing).",
     )
-    p.add_argument("--max-batches", type=int, default=100, help="Max batches to average (default 100)")
+    p.add_argument(
+        "--max-batches",
+        type=int,
+        default=100,
+        help="Batches to average (default 100). Use 0 for the **entire** val dataloader (full split).",
+    )
     p.add_argument(
         "--device",
         choices=("cuda", "cpu"),
@@ -273,16 +278,20 @@ def _run_eval(
     n_batch = 0
     with torch.no_grad():
         for i, data in enumerate(data_loader):
-            if i >= max_batches:
+            if max_batches > 0 and i >= max_batches:
                 break
-            # GPU: pre-scatter to cuda (existing behavior). CPU: MMDataParallel(device_ids=[])
-            # unwraps DataContainers via scatter(..., [-1]) inside forward — do not scatter here.
+            # GPU: pre-scatter to cuda. Do not pass pre-scattered batches through MMDataParallel.forward —
+            # it runs scatter again and can drop keys (e.g. ``img``), causing KeyError in ``forward_train``.
+            # Call the wrapped module directly after manual scatter.
             if not use_cpu:
                 data = scatter(data, [device_id])[0]
             head = model_parallel.module.pts_bbox_head
             if hasattr(head, "reset_memory"):
                 head.reset_memory()
-            losses = model_parallel(return_loss=True, **data)
+            if use_cpu:
+                losses = model_parallel(return_loss=True, **data)
+            else:
+                losses = model_parallel.module(return_loss=True, **data)
             if losses is None:
                 continue
             total += _sum_ttc_terms(losses)
@@ -350,25 +359,52 @@ def _save_eval_visuals(
     colors.append("#2d6a4f")
 
     fig, ax = plt.subplots(figsize=(5.5, 4.2), dpi=120)
-    x = range(len(labels))
-    bars = ax.bar(x, vals, color=colors, edgecolor="0.2", linewidth=0.8)
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(labels, rotation=15, ha="right")
-    ax.set_ylabel("Mean Σ frame_*_loss_ttc  (per batch)")
     ann_short = os.path.basename(args.ann_file)
-    ax.set_title(f"TTC MLP eval  ({ann_short}, batches≤{args.max_batches})")
-    finite = [v for v in vals if not math.isnan(v)]
-    ymax = max(finite) if finite else 1.0
-    ax.set_ylim(0, ymax * 1.15 if ymax > 0 else 1.0)
-    for b, v in zip(bars, vals):
+    mb = int(getattr(args, "max_batches", 0))
+    # Never label as "batches≤0" — max_batches<=0 means entire val loader.
+    _bt = "full val (all batches)" if mb <= 0 else f"first {mb} batches only"
+
+    def _finite_plot_height(v: float) -> float:
+        if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
+            return 0.0
+        return float(v)
+
+    # No batches → NaN means; bar chart would be blank — show a clear message instead.
+    if trained_nb <= 0 or (isinstance(trained_mean, float) and math.isnan(trained_mean)):
+        ax.axis("off")
+        ax.set_title(f"TTC MLP eval  ({ann_short}, {_bt})")
         ax.text(
-            b.get_x() + b.get_width() / 2.0,
-            b.get_height(),
-            f"{v:.4f}",
+            0.5,
+            0.55,
+            "No batches evaluated (n_batches=0 or loss is NaN).\n"
+            "Check: ann_file / --data-root, dataloader length, and job logs for errors.",
             ha="center",
-            va="bottom",
+            va="center",
+            transform=ax.transAxes,
             fontsize=10,
         )
+    else:
+        x = range(len(labels))
+        plot_heights = [_finite_plot_height(v) for v in vals]
+        bars = ax.bar(x, plot_heights, color=colors, edgecolor="0.2", linewidth=0.8)
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(labels, rotation=15, ha="right")
+        ax.set_ylabel("Mean Σ frame_*_loss_ttc  (per batch)")
+        ax.set_title(f"TTC MLP eval  ({ann_short}, {_bt})")
+        finite = [v for v in vals if not math.isnan(v) and not math.isinf(v)]
+        ymax = max(finite) if finite else 1.0
+        ax.set_ylim(0, ymax * 1.15 if ymax > 0 else 1.0)
+        for b, v in zip(bars, vals):
+            lbl = "nan" if (isinstance(v, float) and math.isnan(v)) else f"{v:.4f}"
+            ytop = b.get_height()
+            ax.text(
+                b.get_x() + b.get_width() / 2.0,
+                ytop,
+                lbl,
+                ha="center",
+                va="bottom",
+                fontsize=10,
+            )
     fig.tight_layout()
     png_path = os.path.join(save_dir, "ttc_loss_compare.png")
     fig.savefig(png_path, bbox_inches="tight")
@@ -413,6 +449,11 @@ def main():
         shuffler_sampler=cfg.data.shuffler_sampler,
         nonshuffler_sampler=cfg.data.nonshuffler_sampler,
         runner_type=cfg.runner,
+    )
+    print(
+        f"[eval_ttc_mlp] val batches in loader: {len(data_loader)}  "
+        f"(using {'ALL batches (full split)' if args.max_batches <= 0 else f'first {args.max_batches} batches only'})",
+        flush=True,
     )
 
     def fresh_model():
