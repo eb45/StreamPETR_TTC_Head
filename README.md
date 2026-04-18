@@ -1,22 +1,41 @@
 # StreamPETR + TTC Risk Head
 
-Frozen StreamPETR backbone with a small MLP for time-to-collision (seconds) on nuScenes.
+Frozen StreamPETR detector with a lightweight MLP head that predicts time-to-collision (TTC) in seconds on nuScenes.
 
-**Docs:** [setup](docs/setup.md) · [data](docs/data_preparation.md) · [TTC labels](docs/ttc_labels.md)
+## What it Does
 
-Use one **nuScenes split** end-to-end: **mini** (`v1.0-mini`, smaller, faster) or **full trainval** (`v1.0` / `v1.0-trainval` trees, much longer runs). Match `--version` flags and pickle paths to the data you actually downloaded.
+<p align="center">
+  <img src="docs/imgs/mermaid_diagram_372.svg" alt="Flowchart: Part 1 ground-truth TTC labels, Part 2 physics TTC from StreamPETR predictions, Part 3 frozen StreamPETR with TTC MLP head and supervision from GT TTC" width="92%" />
+</p>
 
-| Step | Stage | What to run |
-|------|--------|-------------|
-| 1 | Environment | Follow [docs/setup.md](docs/setup.md); put nuScenes under `data/nuscenes/`. |
-| 2 | Temporal infos | `python tools/create_data_nusc.py --root-path ./data/nuscenes --out-dir ./data/nuscenes --extra-tag nuscenes2d --version <ver>` — **mini:** `v1.0-mini` · **full:** `v1.0` (see [data prep](docs/data_preparation.md)). Writes `nuscenes2d_temporal_infos_{train,val}.pkl`. |
-| 3 | Pretrained detector | Place StreamPETR weights in `ckpts/` (e.g. `stream_petr_vov_flash_800_bs2_seq_24e.pth`). |
-| 4 | TTC labels | `python tools/generate_ttc_labels.py --data-root ./data/nuscenes --version <ver> --out <path.pkl>` — **mini:** e.g. `v1.0-mini` → `ttc_gt_labels_v1_0_mini.pkl` · **full:** e.g. `v1.0-trainval` → e.g. `ttc_gt_labels_v1_0_trainval.pkl`. |
-| 5 | Train TTC head | `python tools/train.py projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e.py --work-dir ./work_dirs/... --launcher none` **or** Slurm: `sbatch ttc_mlp_head.sh` (1 GPU) / `sbatch ttc_mlp_head_4gpu.sh` (4 GPU). Set `NUSCENES_VER` in Slurm to match your split. |
-| 6 | Baselines | `python tools/ttc_heuristic_baseline.py` (`--help` for args). |
-| 7 | Eval TTC | `python tools/eval_ttc_breakdown.py ... <work_dir>/latest.pth --ann-file ./data/nuscenes/nuscenes2d_temporal_infos_val.pkl` — same release as training; mini and full each have their own `*_val.pkl`. |
+This project uses time-to-collision (TTC) as a risk metric for autonomous driving and evaluates it on the [nuScenes](https://www.nuscenes.org/) dataset with StreamPETR as the 3D perception backbone. Ground-truth TTC is built from physics-based labels. We then compare two predictors: a physics baseline that feeds StreamPETR’s outputs through the same closure model used for labeling, and a TTC head trained on top of a frozen StreamPETR so the network regresses seconds-to-collision directly from object query features—giving you both an interpretable baseline and a learned risk estimate from the same detections.
 
-Set **`STREAMPETR_TTC_PKL`** (step 4 pickle) and **`STREAMPETR_LOAD_FROM`** (step 3 checkpoint) when training or evaluating.
+## Quick Start
+
+1. **[SETUP.md](SETUP.md)** — environment, nuScenes layout, temporal infos, TTC label pickle, and StreamPETR weights in `ckpts/`.
+2. **Train (Slurm):** `sbatch ttc_mlp_head.sh` (1 GPU) or `sbatch ttc_mlp_head_4gpu.sh` — set `NUSCENES_ROOT` and related env vars as documented there.
+3. **Eval (Slurm):** `CHECKPOINT=work_dirs/.../latest.pth sbatch run_eval_ttc_mlp.sh` for mini val; `sbatch run_eval_ttc_mlp_full.sh` for full val (optional `NUSCENES_ROOT`).
+
+## Video Links
+
+- **Demo:** *[ADD DEMO VIDEO URL HERE]*
+- **Technical walkthrough:** *[ADD TECHNICAL WALKTHROUGH HERE]*
+
+## Evaluation
+
+Potential things I'll include:
+
+- 3-way comparison - error of MLP TTC vs physics TTC vs GT TTC
+- Metrics conditional on GT TTC to align with loss tiers: Under 1s, under 3s, under 5, under 10 maybe?
+- By class - is it more accurate for pedestrians (slow moving objects), cars (fast moving objects), cones (unmoving objects)
+- V1 vs V2 vs V3 (if i make one??)
+- Ablations
+  - embeddings only versus embeddings + predicted velocity (V3)
+- Qualitative evaluations
+  - How does it perform at an intersection, going on a straight-away, in a parking lot
+  - Could use the explicit scene comparisons and link BEV/CAM panels
+
+---
 
 Based on [StreamPETR](https://github.com/exiawsh/StreamPETR) (ICCV 2023).
 
@@ -28,3 +47,4 @@ Based on [StreamPETR](https://github.com/exiawsh/StreamPETR) (ICCV 2023).
   year={2023}
 }
 ```
+
