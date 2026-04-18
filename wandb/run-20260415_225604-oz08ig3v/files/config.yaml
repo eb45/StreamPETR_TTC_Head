@@ -1,0 +1,126 @@
+_wandb:
+    value:
+        cli_version: 0.24.2
+        e:
+            p28bgzlhv8rlk5pjhvoa10p5u4fvbsu0:
+                args:
+                    - projects/configs/StreamPETR_ttc_v2/stream_petr_vov_ttc_frozen_20e.py
+                    - --seed
+                    - "0"
+                    - --launcher
+                    - pytorch
+                    - --work-dir
+                    - ./work_dirs/streampetr_ttc_v2_frozen_20e_1gpu
+                    - --cfg-options
+                    - num_gpus=1
+                    - batch_size=2
+                    - num_iters_per_epoch=14065
+                    - runner.max_iters=281300
+                    - checkpoint_config.interval=14065
+                    - evaluation.interval=14065
+                    - data.train.data_root=/hpc/home/eb408/eb408/CS372/StreamPETR/data_full/nuscenes/
+                    - data.train.ann_file=/hpc/home/eb408/eb408/CS372/StreamPETR/data_full/nuscenes/nuscenes2d_temporal_infos_train.pkl
+                    - data.val.data_root=/hpc/home/eb408/eb408/CS372/StreamPETR/data_full/nuscenes/
+                    - data.val.ann_file=/hpc/home/eb408/eb408/CS372/StreamPETR/data_full/nuscenes/nuscenes2d_temporal_infos_val.pkl
+                    - data.test.data_root=/hpc/home/eb408/eb408/CS372/StreamPETR/data_full/nuscenes/
+                    - data.test.ann_file=/hpc/home/eb408/eb408/CS372/StreamPETR/data_full/nuscenes/nuscenes2d_temporal_infos_val.pkl
+                codePath: tools/train.py
+                codePathLocal: tools/train.py
+                cpu_count: 48
+                cpu_count_logical: 96
+                cudaVersion: "13.1"
+                disk:
+                    /:
+                        total: "107307073536"
+                        used: "16995917824"
+                email: eb408@duke.edu
+                executable: /hpc/home/eb408/eb408/CS372/streampetr_env/bin/python
+                git:
+                    commit: 7c8b8387662e293e355fbbfde5f234056375541a
+                    remote: https://github.com/eb45/collision-risk-perception.git
+                gpu: NVIDIA GeForce RTX 2080 Ti
+                gpu_count: 2
+                gpu_nvidia:
+                    - architecture: Turing
+                      cudaCores: 4352
+                      memoryTotal: "11811160064"
+                      name: NVIDIA GeForce RTX 2080 Ti
+                      uuid: GPU-41eb5400-79f3-5344-cc72-678c519a50ae
+                    - architecture: Turing
+                      cudaCores: 4352
+                      memoryTotal: "11811160064"
+                      name: NVIDIA GeForce RTX 2080 Ti
+                      uuid: GPU-38470a90-0966-976a-b722-44d2bfb0b2a5
+                host: dcc-dhvimdcore-gpu-ferc-s-p15-19
+                memory:
+                    total: "809642897408"
+                os: Linux-5.14.0-611.13.1.el9_7.x86_64-x86_64-with-glibc2.17
+                program: tools/train.py
+                python: CPython 3.8.20
+                root: /hpc/group/naderilab/eb408/CS372/StreamPETR
+                slurm:
+                    cluster_name: dcc
+                    conf: /var/spool/slurmd/conf-cache/slurm.conf
+                    cpus_on_node: "4"
+                    cpus_per_task: "4"
+                    gpus_on_node: "2"
+                    gtids: "0"
+                    job_account: naderilab
+                    job_cpus_per_node: "4"
+                    job_end_time: "1776480827"
+                    job_gid: "1000000"
+                    job_gpus: 2,3
+                    job_id: "45619166"
+                    job_name: streampetr_ttc_phase3_dist
+                    job_nodelist: dcc-dhvimdcore-gpu-ferc-s-p15-19
+                    job_num_nodes: "1"
+                    job_partition: common
+                    job_qos: normal
+                    job_start_time: "1776308027"
+                    job_uid: "1512195"
+                    job_user: eb408
+                    jobid: "45619166"
+                    localid: "0"
+                    mem_per_node: "65536"
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: dcc-dhvimdcore-gpu-ferc-s-p15-19
+                    oom_kill_step: "0"
+                    prio_process: "0"
+                    procid: "0"
+                    submit_dir: /hpc/group/naderilab/eb408/CS372/StreamPETR
+                    submit_host: dcc-login-03
+                    task_pid: "1219626"
+                    tasks_per_node: "1"
+                    topology_addr: dcc-dhvimdcore-gpu-ferc-s-p15-19
+                    topology_addr_pattern: node
+                    tres_per_task: cpu=4
+                startedAt: "2026-04-16T02:56:04.732907Z"
+                writerId: p28bgzlhv8rlk5pjhvoa10p5u4fvbsu0
+        m: []
+        python_version: 3.8.20
+        t:
+            "1":
+                - 1
+                - 5
+                - 37
+                - 38
+                - 41
+                - 53
+                - 60
+            "2":
+                - 1
+                - 5
+                - 37
+                - 38
+                - 41
+                - 53
+                - 60
+            "3":
+                - 61
+            "4": 3.8.20
+            "5": 0.24.2
+            "8":
+                - 2
+            "12": 0.24.2
+            "13": linux-x86_64
