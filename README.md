@@ -12,8 +12,8 @@ This project uses time-to-collision (TTC) as a risk metric for autonomous drivin
 
 <p align="center">
   <i>Qualitative example — CAM_FRONT with TTC-colored boxes (<code>compare_ttc_scene</code>)</i><br /><br />
-  <video src="imgs/scene_ttc_front_example.mp4" controls width="92%"></video><br />
-  <a href="imgs/scene_ttc_front_example.mp4">Direct link (MP4)</a>
+  <video src="docs/imgs/scene_ttc_front_example.mp4" controls width="92%"></video><br />
+  <a href="docs/imgs/scene_ttc_front_example.mp4">Direct link (MP4)</a>
 </p>
 
 ## Quick Start
