@@ -110,17 +110,16 @@ sbatch ttc_mlp_head_4gpu.sh
 **Mini val split** (same infos + TTC pickle as nuScenes mini prep) — pass a checkpoint relative to the repo root:
 
 ```bash
-CHECKPOINT=work_dirs/streampetr_ttc_frozen_20e_4gpu/latest.pth sbatch run_eval_ttc_mlp.sh
-
-CHECKPOINT=work_dirs/streampetr_ttc_frozen_20e_1gpu/latest.pth sbatch run_eval_ttc_mlp.sh
+CHECKPOINT=work_dirs/streampetr_ttc_frozen_20e_4gpu/latest.pth MAX_BATCHES=2 BREAKDOWN_MAX_BATCHES=2 \
+sbatch slurm_scripts/run_eval_ttc_mlp.sh
 ```
 
 **Full trainval val split**:
 
 ```bash
-sbatch run_eval_ttc_mlp_full.sh
+CHECKPOINT=work_dirs/streampetr_ttc_frozen_20e_4gpu/latest.pth MAX_BATCHES=2 BREAKDOWN_MAX_BATCHES=2 \
+sbatch slurm_scripts/run_eval_ttc_mlp_full.sh
 ```
-
 
 
 More information can be found in the original StreamPETR documentation as well: [docs/setup.md](docs/setup.md), [docs/data_preparation.md](docs/data_preparation.md), [docs/training_inference.md](docs/training_inference.md).

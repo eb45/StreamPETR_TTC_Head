@@ -1,6 +1,7 @@
 #!/bin/bash
 # TTC eval (mini val). Full trainval: run_eval_ttc_mlp_full.sh
-# Typical: CHECKPOINT=work_dirs/.../latest.pth sbatch run_eval_ttc_mlp.sh
+# Run from StreamPETR repo root:  cd /path/to/StreamPETR && sbatch run_eval_ttc_mlp.sh
+# (Slurm sets SLURM_SUBMIT_DIR to that cwd.) Override: STREAMPETR_REPO=/path/to/StreamPETR
 # Env: CONFIG, CHECKPOINT, ANN_FILE, NUSCENES_ROOT, MAX_BATCHES, SKIP_TTC_BREAKDOWN, SKIP_COMPARE_SCENE, SCENE_TOKEN, ...
 
 #SBATCH --job-name=eval_ttc_mlp
@@ -14,12 +15,18 @@
 
 set -euo pipefail
 mkdir -p logs
-if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-  _REPO="${SLURM_SUBMIT_DIR}"
-else
-  _REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fi
-cd "${_REPO}"
+
+_root="${STREAMPETR_REPO:-${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
+cd "$(cd "${_root}" && pwd)" || { echo "FATAL: cannot cd to ${_root}" >&2; exit 1; }
+[[ -f src/tools/eval_ttc_mlp.py ]] || {
+  echo "FATAL: not at StreamPETR root (missing src/tools/eval_ttc_mlp.py). Run: cd /path/to/StreamPETR && sbatch run_eval_ttc_mlp.sh" >&2
+  echo "  Or set STREAMPETR_REPO to the repo root." >&2
+  exit 1
+}
+
+# set -u: optional env vars referenced below must have a default before first use
+USE_SRUN="${USE_SRUN:-0}"
+PRETRAINED_BASELINE="${PRETRAINED_BASELINE:-}"
 
 for _modinit in /etc/profile.d/modules.sh /usr/share/Modules/init/bash /hpc/group/naderilab/navid/miniconda3/etc/profile.d/modules.sh; do
   [[ -f "${_modinit}" ]] && source "${_modinit}" && break
@@ -45,7 +52,10 @@ if [[ "${STREAMPETR_KEEP_CUDA_HOME:-0}" != "1" ]]; then
 else
   [[ -n "${CUDA_HOME:-}" ]] && [[ -d "${CUDA_HOME}/lib64" ]] && export LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
 fi
-export PYTHONPATH="$(pwd):$(pwd)/src:$(pwd)/src/tools:${PYTHONPATH:-}"
+# mmdet3d: use conda/site-packages if installed; else vendored MMDetection3D at repo root.
+_PYP="$(pwd):$(pwd)/src:$(pwd)/src/tools"
+[[ -d "$(pwd)/mmdetection3d/mmdet3d" ]] && _PYP="$(pwd)/mmdetection3d:${_PYP}"
+export PYTHONPATH="${_PYP}:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_MODULE_LOADING=LAZY
@@ -64,9 +74,22 @@ python -u -c "import os; os.environ.setdefault('CUDA_MODULE_LOADING','LAZY'); im
   echo "FATAL: PyTorch cannot see CUDA." >&2
   exit 1
 }
+python -u -c "import mmdet3d; print('[eval] mmdet3d OK')" || {
+  _root="$(pwd)"
+  echo "FATAL: Python cannot import mmdet3d (MMDetection3D)." >&2
+  echo "  Repo: ${_root}" >&2
+  echo "  PYTHONPATH: ${PYTHONPATH:-}" >&2
+  if [[ -d "${_root}/mmdetection3d/mmdet3d" ]]; then
+    echo "  ${_root}/mmdetection3d exists but is not installed in this env — run: pip install -e ${_root}/mmdetection3d" >&2
+  else
+    echo "  Missing ${_root}/mmdetection3d — on a node with git+network, from repo root: bash scripts/ensure_mmdet3d.sh" >&2
+    echo "  (see docs/setup.md: mmcv-full, mmdet, mmseg, then mmdet3d v1.0.0rc6)" >&2
+  fi
+  exit 1
+}
 
 CONFIG="${CONFIG:-src/projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e.py}"
-CHECKPOINT="${CHECKPOINT:-${CKPT:-work_dirs/streampetr_ttc_frozen_20e/iter_140650.pth}}"
+CHECKPOINT="${CHECKPOINT:-${CKPT:-outputs/streampetr_ttc_frozen_20e/iter_140650.pth}}"
 ANN_FILE="${ANN_FILE:-data/nuscenes/nuscenes2d_temporal_infos_val.pkl}"
 NUSCENES_ROOT_RESOLVED="${COMPARE_DATA_ROOT:-${NUSCENES_ROOT:-$(pwd)/data/nuscenes}}"
 NUSCENES_ROOT_RESOLVED="${NUSCENES_ROOT_RESOLVED%/}/"
@@ -98,8 +121,7 @@ cmd=(
 [[ -n "${NUSCENES_ROOT_RESOLVED}" ]] && cmd+=(--data-root "${NUSCENES_ROOT_RESOLVED}")
 [[ -f ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth ]] && cmd+=(--pretrained-baseline ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth)
 
-USE_SRUN="${USE_SRUN:-0}"
-if [[ "${USE_SRUN}" == "1" ]] && command -v srun &>/dev/null; then
+if [[ "${USE_SRUN:-0}" == "1" ]] && command -v srun &>/dev/null; then
   srun "${cmd[@]}"
 else
   "${cmd[@]}"
@@ -118,7 +140,7 @@ else
   )
   [[ -n "${NUSCENES_ROOT_RESOLVED}" ]] && breakdown_cmd+=(--data-root "${NUSCENES_ROOT_RESOLVED}")
   [[ -n "${STREAMPETR_TTC_PKL:-}" ]] && [[ -f "${STREAMPETR_TTC_PKL}" ]] && breakdown_cmd+=(--ttc-pkl "${STREAMPETR_TTC_PKL}")
-  if [[ "${USE_SRUN}" == "1" ]] && command -v srun &>/dev/null; then
+  if [[ "${USE_SRUN:-0}" == "1" ]] && command -v srun &>/dev/null; then
     srun "${breakdown_cmd[@]}"
   else
     "${breakdown_cmd[@]}"
@@ -126,11 +148,10 @@ else
 fi
 
 if [[ "${SKIP_COMPARE_SCENE:-0}" != "1" ]]; then
-  PRETRAINED_BASELINE="${PRETRAINED_BASELINE:-}"
-  if [[ -z "${PRETRAINED_BASELINE}" ]] && [[ -f ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth ]]; then
+  if [[ -z "${PRETRAINED_BASELINE:-}" ]] && [[ -f ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth ]]; then
     PRETRAINED_BASELINE="ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth"
   fi
-  if [[ -z "${PRETRAINED_BASELINE}" ]] || [[ ! -f "${PRETRAINED_BASELINE}" ]]; then
+  if [[ -z "${PRETRAINED_BASELINE:-}" ]] || [[ ! -f "${PRETRAINED_BASELINE:-}" ]]; then
     echo "[eval] FATAL: compare_ttc_scene needs --pretrained-baseline. Set PRETRAINED_BASELINE=/path/to/stream_petr_vov_flash_800_bs2_seq_24e.pth" >&2
     exit 1
   fi
@@ -173,7 +194,7 @@ for t in seen:
         echo "[eval] compare scene ${_csi}/${#_compare_scenes[@]} token=${_st} save_dir=${_save}"
         compare_cmd=(
           python -u src/tools/compare_ttc_scene.py "${CONFIG}" "${CHECKPOINT}"
-          --pretrained-baseline "${PRETRAINED_BASELINE}"
+          --pretrained-baseline "${PRETRAINED_BASELINE:-}"
           --ann-file "${ANN_FILE}"
           --scene-token "${_st}"
           --save-dir "${_save}"
@@ -200,7 +221,7 @@ for t in seen:
             [[ -n "${VIDEO_MAX_WIDTH:-}" ]] && compare_cmd+=(--video-max-width "${VIDEO_MAX_WIDTH}")
           fi
         fi
-        if [[ "${USE_SRUN}" == "1" ]] && command -v srun &>/dev/null; then
+        if [[ "${USE_SRUN:-0}" == "1" ]] && command -v srun &>/dev/null; then
           srun "${compare_cmd[@]}"
         else
           "${compare_cmd[@]}"

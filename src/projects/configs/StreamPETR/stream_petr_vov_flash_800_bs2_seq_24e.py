@@ -1,6 +1,11 @@
+import os.path as osp
+
+import mmdet3d
+
+_mmdet = osp.dirname(osp.dirname(mmdet3d.__file__))
 _base_ = [
-    '../../../mmdetection3d/configs/_base_/datasets/nus-3d.py',
-    '../../../mmdetection3d/configs/_base_/default_runtime.py'
+    osp.join(_mmdet, 'configs', '_base_', 'datasets', 'nus-3d.py'),
+    osp.join(_mmdet, 'configs', '_base_', 'default_runtime.py'),
 ]
 backbone_norm_cfg = dict(type='LN', requires_grad=True)
 plugin=True

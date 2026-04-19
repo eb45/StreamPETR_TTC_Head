@@ -39,7 +39,9 @@ model = dict(
     num_frame_losses=num_frame_losses,
     use_grid_mask=True,
     img_backbone=dict(
-        pretrained='torchvision://resnet50',
+        init_cfg=dict(
+            type='Pretrained', checkpoint="ckpts/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth",
+            prefix='backbone.'),       
         type='ResNet',
         depth=50,
         num_stages=4,
@@ -79,10 +81,10 @@ model = dict(
         type='StreamPETRHead',
         num_classes=10,
         in_channels=256,
-        num_query=644,
-        memory_len=1024,
-        topk_proposals=256,
-        num_propagated=256,
+        num_query=300,
+        memory_len=512,
+        topk_proposals=128,
+        num_propagated=128,
         with_ego_pos=True,
         match_with_velo=False,
         scalar=10, ##noise groups
@@ -97,7 +99,7 @@ model = dict(
             type='PETRTemporalTransformer',
             decoder=dict(
                 type='PETRTransformerDecoder',
-                return_intermediate=True,
+                return_intermediate=False,
                 num_layers=6,
                 transformerlayers=dict(
                     type='PETRTemporalDecoderLayer',
@@ -206,22 +208,21 @@ test_pipeline = [
 
 data = dict(
     samples_per_gpu=batch_size,
-    workers_per_gpu=4,
+    workers_per_gpu=2, # workers_per_gpu may influence the inference speed
     train=dict(
         type=dataset_type,
         data_root=data_root,
         ann_file=data_root + 'nuscenes2d_temporal_infos_train.pkl',
         num_frame_losses=num_frame_losses,
-        seq_split_num=2, # streaming video training
-        seq_mode=True, # streaming video training
+        seq_split_num=2,
+        seq_mode=True,
         pipeline=train_pipeline,
         classes=class_names,
         modality=input_modality,
         collect_keys=collect_keys + ['img', 'prev_exists', 'img_metas'],
         queue_length=queue_length,
         test_mode=False,
-        use_valid_flag=True,
-        filter_empty_gt=False,
+        use_valid_flag=False,
         box_type_3d='LiDAR'),
     val=dict(type=dataset_type, pipeline=test_pipeline, collect_keys=collect_keys + ['img', 'img_metas'], queue_length=queue_length, ann_file=data_root + 'nuscenes2d_temporal_infos_val.pkl', classes=class_names, modality=input_modality),
     test=dict(type=dataset_type, pipeline=test_pipeline, collect_keys=collect_keys + ['img', 'img_metas'], queue_length=queue_length, ann_file=data_root + 'nuscenes2d_temporal_infos_val.pkl', classes=class_names, modality=input_modality),
@@ -229,13 +230,12 @@ data = dict(
     nonshuffler_sampler=dict(type='DistributedSampler')
     )
 
-
 optimizer = dict(
     type='AdamW', 
-    lr=4e-4, # bs 8: 2e-4 || bs 16: 4e-4
+    lr=4e-4,
     paramwise_cfg=dict(
         custom_keys={
-            'img_backbone': dict(lr_mult=0.25), # 0.25 only for Focal-PETR with R50-in1k pretrained weights
+            'img_backbone': dict(lr_mult=0.25),
         }),
     weight_decay=0.01)
 

@@ -1,6 +1,11 @@
+import os.path as osp
+
+import mmdet3d
+
+_mmdet = osp.dirname(osp.dirname(mmdet3d.__file__))
 _base_ = [
-    '../../../mmdetection3d/configs/_base_/datasets/nus-3d.py',
-    '../../../mmdetection3d/configs/_base_/default_runtime.py'
+    osp.join(_mmdet, 'configs', '_base_', 'datasets', 'nus-3d.py'),
+    osp.join(_mmdet, 'configs', '_base_', 'default_runtime.py'),
 ]
 backbone_norm_cfg = dict(type='LN', requires_grad=True)
 plugin=True
@@ -11,12 +16,17 @@ plugin_dir='projects/mmdet3d_plugin/'
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 voxel_size = [0.2, 0.2, 8]
 img_norm_cfg = dict(
-    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+    mean=[103.530, 116.280, 123.675], std=[57.375, 57.120, 58.395], to_rgb=False) # fix img_norm
 # For nuScenes we usually do 10-class detection
 class_names = [
     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
 ]
+
+num_gpus = 8
+batch_size = 2
+num_iters_per_epoch = 28130 // (num_gpus * batch_size)
+num_epochs = 24
 
 queue_length = 1
 num_frame_losses = 1
@@ -34,19 +44,15 @@ model = dict(
     num_frame_losses=num_frame_losses,
     use_grid_mask=True,
     img_backbone=dict(
-        pretrained='torchvision://resnet50',
-        type='ResNet',
-        depth=50,
-        num_stages=4,
-        out_indices=(2, 3),
-        frozen_stages=-1,
-        norm_cfg=dict(type='BN2d', requires_grad=False),
+        type='VoVNetCP', ###use checkpoint to save memory
+        spec_name='V-99-eSE',
         norm_eval=True,
-        with_cp=True,
-        style='pytorch'),
+        frozen_stages=-1,
+        input_ch=3,
+        out_features=('stage4','stage5',)),
     img_neck=dict(
         type='CPFPN',  ###remove unused parameters 
-        in_channels=[1024, 2048],
+        in_channels=[768, 1024],
         out_channels=256,
         num_outs=2),
     img_roi_head=dict(
@@ -71,10 +77,15 @@ model = dict(
             centers2d_cost=dict(type='BBox3DL1Cost', weight=10.0)))
         ),
     pts_bbox_head=dict(
-        type='PETRHeadDN',
+        type='StreamPETRHead',
         num_classes=10,
         in_channels=256,
-        num_query=900,
+        num_query=644,
+        memory_len=1024,
+        topk_proposals=256,
+        num_propagated=256,
+        with_ego_pos=True,
+        match_with_velo=False,
         scalar=10, ##noise groups
         noise_scale = 1.0, 
         dn_weight= 1.0, ##dn loss weight
@@ -82,7 +93,7 @@ model = dict(
         LID=True,
         with_position=True,
         position_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
-        code_weights = [2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2],
+        code_weights = [2.0, 2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         transformer=dict(
             type='PETRTemporalTransformer',
             decoder=dict(
@@ -98,7 +109,7 @@ model = dict(
                             num_heads=8,
                             dropout=0.1),
                         dict(
-                            type='PETRMultiheadFlashAttention', 
+                            type='PETRMultiheadFlashAttention',
                             embed_dims=256,
                             num_heads=8,
                             dropout=0.1),
@@ -145,8 +156,8 @@ file_client_args = dict(backend='disk')
 
 
 ida_aug_conf = {
-        "resize_lim": (0.38, 0.55),
-        "final_dim": (256, 704),
+        "resize_lim": (0.47, 0.625),
+        "final_dim": (320, 800),
         "bot_pct_lim": (0.0, 0.0),
         "rot_lim": (0.0, 0.0),
         "H": 900,
@@ -165,7 +176,7 @@ train_pipeline = [
             translation_std=[0, 0, 0],
             scale_ratio_range=[0.95, 1.05],
             reverse_angle=True,
-            training=True
+            training=True,
             ),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
@@ -195,34 +206,37 @@ test_pipeline = [
 ]
 
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=batch_size,
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,
         data_root=data_root,
         ann_file=data_root + 'nuscenes2d_temporal_infos_train.pkl',
         num_frame_losses=num_frame_losses,
+        seq_split_num=2, # streaming video training
+        seq_mode=True, # streaming video training
         pipeline=train_pipeline,
         classes=class_names,
         modality=input_modality,
         collect_keys=collect_keys + ['img', 'prev_exists', 'img_metas'],
         queue_length=queue_length,
-        load_interval=1,
         test_mode=False,
         use_valid_flag=True,
+        filter_empty_gt=False,
         box_type_3d='LiDAR'),
     val=dict(type=dataset_type, pipeline=test_pipeline, collect_keys=collect_keys + ['img', 'img_metas'], queue_length=queue_length, ann_file=data_root + 'nuscenes2d_temporal_infos_val.pkl', classes=class_names, modality=input_modality),
     test=dict(type=dataset_type, pipeline=test_pipeline, collect_keys=collect_keys + ['img', 'img_metas'], queue_length=queue_length, ann_file=data_root + 'nuscenes2d_temporal_infos_val.pkl', classes=class_names, modality=input_modality),
-    shuffler_sampler=dict(type='DistributedGroupSampler'),
+    shuffler_sampler=dict(type='InfiniteGroupEachSampleInBatchSampler'),
     nonshuffler_sampler=dict(type='DistributedSampler')
     )
+
 
 optimizer = dict(
     type='AdamW', 
     lr=4e-4, # bs 8: 2e-4 || bs 16: 4e-4
     paramwise_cfg=dict(
         custom_keys={
-            'img_backbone': dict(lr_mult=0.25), # 0.25 only for Focal-PETR with R50-in1k pretrained weights
+            'img_backbone': dict(lr_mult=0.1), # set to 0.1 always better when apply 2D pretrained.
         }),
     weight_decay=0.01)
 
@@ -236,10 +250,10 @@ lr_config = dict(
     min_lr_ratio=1e-3,
     )
 
-total_epochs = 24
-evaluation = dict(interval=24, pipeline=test_pipeline)
+evaluation = dict(interval=num_iters_per_epoch*num_epochs, pipeline=test_pipeline)
 find_unused_parameters=False #### when use checkpoint, find_unused_parameters must be False
-checkpoint_config = dict(interval=1, max_keep_ckpts=3)
-runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-load_from=None
+checkpoint_config = dict(interval=num_iters_per_epoch, max_keep_ckpts=3)
+runner = dict(
+    type='IterBasedRunner', max_iters=num_epochs * num_iters_per_epoch)
+load_from='ckpts/fcos3d_vovnet_imgbackbone-remapped.pth'
 resume_from=None

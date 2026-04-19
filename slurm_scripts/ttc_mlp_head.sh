@@ -38,7 +38,9 @@ then
   exit 1
 fi
 
-export PYTHONPATH="$(pwd):$(pwd)/src:$(pwd)/src/tools:${PYTHONPATH:-}"
+_PYP="$(pwd):$(pwd)/src:$(pwd)/src/tools"
+[[ -d "$(pwd)/mmdetection3d/mmdet3d" ]] && _PYP="$(pwd)/mmdetection3d:${_PYP}"
+export PYTHONPATH="${_PYP}:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
 
 NUSCENES_ROOT="${NUSCENES_ROOT:-/work/eb408/nuscenes/train}"

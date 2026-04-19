@@ -13,13 +13,35 @@
 set -euo pipefail
 mkdir -p logs
 
-_REPO="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_REPO=""
+for _cand in "${SLURM_SUBMIT_DIR:-}" "$(dirname "${SLURM_SUBMIT_DIR:-.}")" "${_script_dir}" "$(dirname "${_script_dir}")"; do
+  [[ -z "${_cand}" || "${_cand}" == "." ]] && continue
+  _cand="$(cd "${_cand}" 2>/dev/null && pwd)" || continue
+  if [[ -f "${_cand}/src/tools/generate_ttc_labels.py" ]]; then
+    _REPO="${_cand}"
+    break
+  fi
+done
+if [[ -z "${_REPO}" ]]; then
+  _d="${_script_dir}"
+  while [[ "${_d}" != "/" ]]; do
+    if [[ -f "${_d}/src/tools/generate_ttc_labels.py" ]]; then
+      _REPO="${_d}"
+      break
+    fi
+    _d="$(dirname "${_d}")"
+  done
+fi
+[[ -n "${_REPO}" ]] || { echo "FATAL: cannot find repo root (need src/tools/generate_ttc_labels.py)." >&2; exit 1; }
 cd "${_REPO}"
 
 source /hpc/group/naderilab/navid/miniconda3/bin/activate
 conda activate ~/eb408/CS372/streampetr_env
 
-export PYTHONPATH="$(pwd):$(pwd)/src:$(pwd)/src/tools:${PYTHONPATH:-}"
+_PYP="$(pwd):$(pwd)/src:$(pwd)/src/tools"
+[[ -d "$(pwd)/mmdetection3d/mmdet3d" ]] && _PYP="$(pwd)/mmdetection3d:${_PYP}"
+export PYTHONPATH="${_PYP}:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
 
 NUSCENES_ROOT="${NUSCENES_ROOT:-${_REPO}/data_full/nuscenes}"
