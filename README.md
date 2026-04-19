@@ -10,6 +10,12 @@ Frozen StreamPETR detector with a lightweight MLP head that predicts time-to-col
 
 This project uses time-to-collision (TTC) as a risk metric for autonomous driving and evaluates it on the [nuScenes](https://www.nuscenes.org/) dataset with StreamPETR as the 3D perception backbone. Ground-truth TTC is built from physics-based labels. We then compare two predictors: a physics baseline that feeds StreamPETR’s outputs through the same closure model used for labeling, and a TTC head trained on top of a frozen StreamPETR so the network regresses seconds-to-collision directly from object query features—giving you both an interpretable baseline and a learned risk estimate from the same detections.
 
+<p align="center">
+  <i>Qualitative example — CAM_FRONT with TTC-colored boxes (<code>compare_ttc_scene</code>)</i><br /><br />
+  <video src="imgs/scene_ttc_front_example.mp4" controls width="92%"></video><br />
+  <a href="imgs/scene_ttc_front_example.mp4">Direct link (MP4)</a>
+</p>
+
 ## Quick Start
 
 1. **[SETUP.md](SETUP.md)** — environment, nuScenes layout, temporal infos, TTC label pickle, and StreamPETR weights in `ckpts/`.
