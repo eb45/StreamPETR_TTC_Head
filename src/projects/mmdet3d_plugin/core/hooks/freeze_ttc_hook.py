@@ -1,4 +1,3 @@
-# Copyright (c) OpenMMLab. All rights reserved.
 """Freeze all parameters except the TTC MLP (``*ttc_head*``)."""
 from mmcv.runner import HOOKS, Hook
 

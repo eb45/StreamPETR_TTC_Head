@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-# Copyright (c) OpenMMLab. All rights reserved.
 """Heuristic and linear TTC baselines vs. StreamPETR box/velocity outputs.
 
 Requires:
-  - mmcv, numpy, nuscenes
-  - Pickle from ``tools/test.py --out ...`` on the same ``ann_file`` split
-  - Pickle from ``tools/generate_ttc_labels.py``
-
-Example:
-  python tools/generate_ttc_labels.py --data-root ./data/nuscenes --version v1.0-mini
-  python tools/test.py configs/xxx.py ckpts/xxx.pth --out ./work_dirs/preds.pkl
-  python tools/ttc_heuristic_baseline.py \\
-      --data-root ./data/nuscenes \\
-      --info ./data/nuscenes/nuscenes2d_temporal_infos_val.pkl \\
-      --ttc-labels ./data/nuscenes/ttc_gt_labels_v1_0_mini.pkl \\
-      --pred-results ./work_dirs/preds.pkl
+- Pkl from "tools/test.py --out"
+- Pkl from "tools/generate_ttc_labels.py"
 """
+
 from __future__ import annotations
 
 import argparse
@@ -373,7 +363,6 @@ def main():
     h_tr, h_te = h[tr], h[te]
     X_tr, X_te = X[tr], X[te]
 
-    # Same held-out indices for every row (heuristic was mistakenly evaluated on all n before).
     mae_h_te, rmse_h_te = mae_rmse(y_te, h_te)
     rec_h_te = recall_at_3s(y_te, h_te)
     n_h_fin_te = int(np.sum(np.isfinite(h_te)))
