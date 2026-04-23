@@ -27,7 +27,7 @@ This project uses time-to-collision (TTC) as a risk metric for autonomous drivin
 
 ## Data
 
-We use the [nuScenes](https://www.nuscenes.org/) autonomous driving dataset. it consists of about **1,000 scenes of 20 s each**, on the order of **1,400,000** camera images and **390,000** LiDAR sweeps, recorded in **Boston and Singapore** with both **left- and right-hand** traffic. In this repo,  **v1.0-mini** is used for quick tests and **v1.0-trainval** for full experiments.
+Used [nuScenes](https://www.nuscenes.org/) autonomous driving dataset. It consists of about **1,000 scenes of 20 s each**, on the order of **1,400,000** camera images and **390,000** LiDAR sweeps, recorded in **Boston and Singapore** with both **left- and right-hand** traffic. In this repo,  **v1.0-mini** is used for quick tests and **v1.0-trainval** for full experiments.
 
 <p align="center">
   <img src="docs/imgs/nuscenes_dataset_example.png" alt="Example scenes from Nuscenes dataset" width="92%" />
