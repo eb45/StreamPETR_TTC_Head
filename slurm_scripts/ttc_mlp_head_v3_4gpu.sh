@@ -1,12 +1,12 @@
 #!/bin/bash
-# Frozen StreamPETR + TTC head (1 GPU). Edit cd/conda below for your cluster.
-#SBATCH --job-name=streampetr_ttc_phase3
+# TTC v3 head (query + velocity) — multi-GPU (dist_train). Same layout as ttc_mlp_head_4gpu.sh.
+#SBATCH --job-name=streampetr_ttc_v3_dist
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --partition=common
-#SBATCH --gres=gpu:1
-#SBATCH --mem=64G
-#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:4
+#SBATCH --mem=96G
+#SBATCH --cpus-per-task=16
 #SBATCH --time=24:00:00
 
 set -euo pipefail
@@ -20,7 +20,7 @@ conda activate ~/eb408/CS372/streampetr_env
 echo "[gpu] host=$(hostname) CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
 if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi -L || {
-    echo "[gpu] FATAL: nvidia-smi failed. Request a GPU job: #SBATCH --gres=gpu:1 on a GPU partition; do not run train on a login node." >&2
+    echo "[gpu] FATAL: nvidia-smi failed. Request a GPU job (--gres=gpu:<N>) on a GPU partition." >&2
     exit 1
   }
 else
@@ -31,10 +31,10 @@ import torch
 if not torch.cuda.is_available():
     raise SystemExit("CUDA not available (torch.cuda.is_available() is False)")
 _ = torch.zeros(1, device="cuda")
-print("[gpu] torch OK:", torch.version.cuda, "|", torch.cuda.get_device_name(0))
+print("[gpu] torch OK:", torch.version.cuda, "|", torch.cuda.device_count(), "GPU(s)")
 PY
 then
-  echo "[gpu] FATAL: PyTorch could not use CUDA." >&2
+  echo "[gpu] FATAL: PyTorch could not initialize CUDA." >&2
   exit 1
 fi
 
@@ -43,13 +43,27 @@ _PYP="$(pwd):$(pwd)/src:$(pwd)/src/tools"
 export PYTHONPATH="${_PYP}:${PYTHONPATH:-}"
 export PYTHONUNBUFFERED=1
 
-NUSCENES_ROOT="${NUSCENES_ROOT:-/work/eb408/nuscenes/train}"
+NUSCENES_ROOT="${NUSCENES_ROOT:-$(pwd)/data/nuscenes}"
 NUSCENES_ROOT="${NUSCENES_ROOT%/}/"
 NUSCENES_VER="${NUSCENES_VER:-v1.0-trainval}"
 export NUSCENES_ROOT
 export NUSCENES_VER
-export WORKERS_PER_GPU="${WORKERS_PER_GPU:-2}"
+
+NUM_GPUS="${NUM_GPUS:-4}"
+BATCH_SIZE="${BATCH_SIZE:-2}"
+NUM_EPOCHS="${NUM_EPOCHS:-20}"
+TRAIN_SAMPLES="${TRAIN_SAMPLES:-28130}"
+export WORKERS_PER_GPU="${WORKERS_PER_GPU:-1}"
 AUTO_PREP_DATA="${AUTO_PREP_DATA:-1}"
+
+if [[ "${NUM_GPUS}" -lt 1 ]]; then
+  echo "FATAL: NUM_GPUS must be >= 1 (got ${NUM_GPUS})" >&2
+  exit 1
+fi
+if [[ "${BATCH_SIZE}" -lt 1 ]]; then
+  echo "FATAL: BATCH_SIZE must be >= 1 (got ${BATCH_SIZE})" >&2
+  exit 1
+fi
 
 _default_ttc_pkl() {
   case "${NUSCENES_VER}" in
@@ -59,7 +73,6 @@ _default_ttc_pkl() {
   esac
 }
 export STREAMPETR_TTC_PKL="${STREAMPETR_TTC_PKL:-$(_default_ttc_pkl)}"
-
 export STREAMPETR_LOAD_FROM="${STREAMPETR_LOAD_FROM:-$(pwd)/ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth}"
 export USE_WANDB="${USE_WANDB:-1}"
 
@@ -70,7 +83,7 @@ _create_data_version() {
     v1.0-mini) echo v1.0-mini ;;
     v1.0|v1.0-trainval) echo v1.0 ;;
     *)
-      echo "slurm_ttc_phase3: NUSCENES_VER=${NUSCENES_VER} not supported for auto-prep; use v1.0-mini, v1.0, or v1.0-trainval" >&2
+      echo "ttc_mlp_head_v3_4gpu: NUSCENES_VER=${NUSCENES_VER} not supported for auto-prep" >&2
       return 1
       ;;
   esac
@@ -82,7 +95,7 @@ _ttc_gen_version() {
     v1.0|v1.0-trainval) echo v1.0-trainval ;;
     v1.0-test) echo v1.0-test ;;
     *)
-      echo "slurm_ttc_phase3: NUSCENES_VER=${NUSCENES_VER} not supported for TTC generation" >&2
+      echo "ttc_mlp_head_v3_4gpu: NUSCENES_VER=${NUSCENES_VER} not supported for TTC generation" >&2
       return 1
       ;;
   esac
@@ -143,30 +156,31 @@ else
   echo "[auto-prep] OK  TTC labels pickle: ${STREAMPETR_TTC_PKL}"
 fi
 
-if [[ "${SKIP_VALIDATE_NUSCENES_INFOS:-0}" != "1" ]]; then
-  _v_expect=""
-  case "${NUSCENES_VER}" in
-    v1.0-mini) _v_expect=v1.0-mini ;;
-    v1.0|v1.0-trainval) _v_expect=v1.0-trainval ;;
-  esac
-  if [[ -n "${_v_expect}" ]]; then
-    echo "[validate] train+val infos metadata.version should be ${_v_expect}"
-    python -u src/tools/validate_nuscenes_infos_split.py --expect "${_v_expect}" --data-root "${NUSCENES_ROOT}"
-  fi
+NUM_ITERS_PER_EPOCH=$(( TRAIN_SAMPLES / (NUM_GPUS * BATCH_SIZE) ))
+if [[ "${NUM_ITERS_PER_EPOCH}" -lt 1 ]]; then
+  echo "FATAL: computed NUM_ITERS_PER_EPOCH=${NUM_ITERS_PER_EPOCH}. Adjust NUM_GPUS/BATCH_SIZE/TRAIN_SAMPLES." >&2
+  exit 1
 fi
+MAX_ITERS=$(( NUM_ITERS_PER_EPOCH * NUM_EPOCHS ))
 
-WORK_DIR="${WORK_DIR:-./work_dirs/streampetr_ttc_frozen_20e}"
+WORK_DIR="${WORK_DIR:-./work_dirs/streampetr_ttc_v3_frozen_20e_${NUM_GPUS}gpu}"
 RUN_TRAIN_CURVE_PLOT="${RUN_TRAIN_CURVE_PLOT:-1}"
 RUN_TTC_BEV="${RUN_TTC_BEV:-0}"
 TTC_BEV_OUT="${TTC_BEV_OUT:-${WORK_DIR}/ttc_bev_gt}"
 TTC_BEV_WITH_CAMERAS="${TTC_BEV_WITH_CAMERAS:-1}"
 TTC_BEV_MAX_SAMPLES="${TTC_BEV_MAX_SAMPLES:-0}"
 
-echo "[train] train.py work-dir=${WORK_DIR} data_root=${NUSCENES_ROOT}"
-python src/tools/train.py src/projects/configs/StreamPETR_ttc_v3/stream_petr_vov_ttc_frozen_20e.py \
+CONFIG="${CONFIG:-src/projects/configs/StreamPETR_ttc_v3/stream_petr_vov_ttc_frozen_20e_4gpu.py}"
+echo "[train] dist config=${CONFIG} gpus=${NUM_GPUS} batch_size=${BATCH_SIZE} iters/epoch=${NUM_ITERS_PER_EPOCH} max_iters=${MAX_ITERS}"
+bash src/tools/dist_train.sh "${CONFIG}" "${NUM_GPUS}" \
   --work-dir "${WORK_DIR}" \
-  --launcher none \
   --cfg-options \
+    num_gpus="${NUM_GPUS}" \
+    batch_size="${BATCH_SIZE}" \
+    num_iters_per_epoch="${NUM_ITERS_PER_EPOCH}" \
+    runner.max_iters="${MAX_ITERS}" \
+    checkpoint_config.interval="${NUM_ITERS_PER_EPOCH}" \
+    evaluation.interval="${NUM_ITERS_PER_EPOCH}" \
     data.train.data_root="${NUSCENES_ROOT}" \
     data.train.ann_file="${NUSCENES_ROOT}nuscenes2d_temporal_infos_train.pkl" \
     data.val.data_root="${NUSCENES_ROOT}" \

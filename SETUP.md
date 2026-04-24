@@ -25,7 +25,7 @@ Optional: **flash-attn** can speed up attention and save memory.
 
 ## 3. MMDetection / MMDetection3D
 
-Follow [MMDetection3D installation](https://mmdetection3d.readthedocs.io/en/latest/getting_started.html#installation) steps:
+Follow [MMDetection3D installation](https://mmdetection3d.readthedocs.io/en/latest/get_started.html) steps:
 
 ```bash
 pip install mmcv-full==1.6.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9.0/index.html

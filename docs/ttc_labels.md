@@ -28,4 +28,4 @@ The pickle stores:
 
 ## Heuristic baseline alignment
 
-`tools/ttc_heuristic_baseline.py` maps StreamPETR LiDAR-frame boxes and velocities into the global XY frame with the per-frame `lidar2global` transform derived from the same info fields used to build the dataset, then applies the same TTC definition so predictions are comparable to the stored labels.
+`tools/ttc_heuristic_baseline.py` maps StreamPETR LiDAR-frame boxes and velocities into the global XY frame with the per-frame `lidar2global` transform derived from the same info fields used to build the dataset then applies the same TTC definition so predictions are comparable to the stored labels.

@@ -40,6 +40,8 @@ We use the [nuScenes](https://www.nuscenes.org/) autonomous driving dataset. it 
 | val   | `nuscenes2d_temporal_infos_val.pkl`   | 6,019 (150 scenes)  |
 | test  | `nuscenes2d_temporal_infos_test.pkl`  | 6,008 (150 scenes)  |
 
+**TTC supervision (labels, `LoadGTTC`, matching, loss):** see **[docs/ttc_supervision_pipeline.md](docs/ttc_supervision_pipeline.md)**.
+
 
 ## Evaluation
 

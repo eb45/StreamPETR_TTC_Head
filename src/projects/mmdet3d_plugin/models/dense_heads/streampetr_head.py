@@ -216,12 +216,15 @@ class StreamPETRHead(AnchorFreeHead):
         super(StreamPETRHead, self).__init__(num_classes, in_channels, init_cfg = init_cfg)
 
         if ttc_head is not None:
-            from projects.mmdet3d_plugin.models.dense_heads.ttc_head import TTCRiskHead
+            import projects.mmdet3d_plugin.models.dense_heads.ttc_head as _ttc_mod
 
             if isinstance(ttc_head, dict):
                 _cfg = ttc_head.copy()
-                _cfg.pop('type', None)
-                self.ttc_head = TTCRiskHead(**_cfg)
+                t_type = _cfg.pop('type', 'TTCRiskHead')
+                t_cls = getattr(_ttc_mod, t_type, None)
+                if t_cls is None:
+                    raise ValueError(f'Unknown ttc_head type: {t_type}')
+                self.ttc_head = t_cls(**_cfg)
             else:
                 self.ttc_head = ttc_head
         else:
@@ -974,7 +977,19 @@ class StreamPETRHead(AnchorFreeHead):
                 torch.where(tgt < lt, torch.full_like(tgt, lw), one),
             )
         return torch.where(tgt < lt, torch.full_like(tgt, lw), one)
-    
+
+    def _forward_ttc_head(self, query_feats: torch.Tensor, bbox_preds_rows: torch.Tensor):
+        """Run TTC MLP on matched queries; V3 heads also take vx, vy from bbox preds (indices 8:10)."""
+        th = self.ttc_head
+        q = query_feats.detach()
+        if getattr(th, 'use_velocity', False):
+            if bbox_preds_rows is not None and bbox_preds_rows.size(-1) > 9:
+                vel = bbox_preds_rows[:, 8:10].detach()
+            else:
+                vel = q.new_zeros(q.size(0), 2)
+            return th(q, vel)
+        return th(q)
+
     def loss_ttc(
         self,
         cls_scores_last,
@@ -1015,7 +1030,7 @@ class StreamPETRHead(AnchorFreeHead):
             pos = sampling.pos_inds
             gt_ix = sampling.pos_assigned_gt_inds
             # Do not backprop through StreamPETR when training the TTC head only.
-            pred = self.ttc_head(qf[pos].detach())
+            pred = self._forward_ttc_head(qf[pos], box_i[pos])
             tgt = gt_ttc.to(pred.device)[gt_ix]
             m = torch.isfinite(tgt) & (tgt >= 0)
             if not m.any():
@@ -1112,7 +1127,7 @@ class StreamPETRHead(AnchorFreeHead):
                 continue
             pos = sampling.pos_inds
             gt_ix = sampling.pos_assigned_gt_inds
-            pred = self.ttc_head(qf_b[pos].detach())
+            pred = self._forward_ttc_head(qf_b[pos], box_i[pos])
             tgt = gt_ttc[gt_ix]
             m = torch.isfinite(tgt) & (tgt >= 0)
             if not m.any():
