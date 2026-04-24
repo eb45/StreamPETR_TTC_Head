@@ -45,17 +45,83 @@ Used [nuScenes](https://www.nuscenes.org/) autonomous driving dataset. It consis
 
 ## Evaluation
 
-Potential things I'll include:
+## Protocol
 
-- 3-way comparison - error of MLP TTC vs physics TTC vs GT TTC
-- Metrics conditional on GT TTC to align with loss tiers: Under 1s, under 3s, under 5, under 10 maybe?
-- By class - is it more accurate for pedestrians (slow moving objects), cars (fast moving objects), cones (unmoving objects)
-- V1 vs V2 vs V3 (if i make one??)
-- Ablations
-  - embeddings only versus embeddings + predicted velocity (V3)
-- Qualitative evaluations
-  - How does it perform at an intersection, going on a straight-away, in a parking lot
-  - Could use the explicit scene comparisons and link BEV/CAM panels
+All quantitative results use the **1000-batch / 2779-pair** protocol on the full `v1.0-trainval` val split (`data_full`). Two evaluation scripts are used and reported separately:
+
+- `eval_ttc_breakdown` — per-pair MAE and RMSE between predicted TTC and GT TTC, matched by annotation token
+- `eval_ttc_mlp` — mean sum of `loss_ttc` terms per batch (includes the loss weighting scheme)
+
+The **physics baseline** applies the same closure model used to generate labels (`distance / closing_speed`, capped at 10 s) to StreamPETR's predicted boxes and velocities . All comparisons are against GT TTC derived from `generate_ttc_labels.py`.
+
+---
+
+## 1. Primary Ablation Study
+
+> Key questions:
+>
+> 1. Does the learned head improve over the physics heuristic, and by how much?
+> 2. TTC Head design: Does adding velocity to the head improve performance?
+
+
+| Predictor                                    | n_pairs | MAE (s) | RMSE (s) | Mean error (s) |
+| -------------------------------------------- | ------- | ------- | -------- | -------------- |
+| Physics baseline                             | 2779    | —       | —        | —              |
+| MLP head (Only using query embeddings)       | 2779    | —       | —        | —              |
+| MLP head (Using query + velocity embeddings) | 2779    | —       | —        | —              |
+
+
+---
+
+## 2. Conditional breakdown by GT TTC bin
+
+> Key question: does the MLP head outperform the physics baseline in the safety-critical short bins ([0, 1) and [1, 3))?
+
+Results split by GT TTC bin, aligned with the loss tiers used during training. The [0, 1) bin has very few samples and its numbers should be interpreted with caution.
+
+
+| GT TTC bin (s)   | n   | Physics MAE / RMSE | MLP MAE / RMSE |
+| ---------------- | --- | ------------------ | -------------- |
+| [0, 1)           | —   | —                  | —              |
+| [1, 3)           | —   | —                  | —              |
+| [3, 10)          | —   | —                  | —              |
+| [10, ∞) (capped) | —   | —                  | —              |
+
+
+---
+
+## 3. Per-class breakdown
+
+MAE per object class for both predictors. Pedestrians and cyclists involve more complex motion that the simple closing-speed model may struggle with; cones and barriers are nearly static and should be near the 10 s cap.
+
+
+| Class      | n   | Physics MAE (s) | MLP MAE (s) |
+| ---------- | --- | --------------- | ----------- |
+| car        | —   | —               | —           |
+| pedestrian | —   | —               | —           |
+| bicycle    | —   | —               | —           |
+| motorcycle | —   | —               | —           |
+| truck      | —   | —               | —           |
+| bus        | —   | —               | —           |
+| trailer    | —   | —               | —           |
+
+
+---
+
+## 4. Qualitative evaluation
+
+Four scenes chosen to stress-test different driving regimes. Each panel shows CAM_FRONT with TTC-colored bounding boxes annotated with three values per object: GT / physics / MLP. BEV panels shown where available.
+
+
+| Scene         | Regime                                        | What to look for                                                       |
+| ------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
+| Intersection  | Fast-closing cross-traffic, direction changes | Does the head handle non-radial approach vectors?                      |
+| Straight-away | Same-direction traffic, slow closing speed    | Are near-static objects correctly filtered or capped at 10 s?          |
+| Parking lot   | Near-static objects, low closing speeds       | Checks label filtering and cap behavior                                |
+| Near-miss     | High-urgency short-TTC event                  | Does the head flag risk earlier or more accurately than the heuristic? |
+
+
+> Scene comparisons generated with `compare_ttc_scene`; see `notebooks/` for links to BEV/CAM panel outputs.
 
 ---
 
