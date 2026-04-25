@@ -88,7 +88,7 @@ python -u -c "import mmdet3d; print('[eval] mmdet3d OK')" || {
   exit 1
 }
 
-CONFIG="${CONFIG:-src/projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e.py}"
+CONFIG="${CONFIG:-src/projects/configs/StreamPETR_ttc_v3/stream_petr_vov_ttc_frozen_20e.py}"
 CHECKPOINT="${CHECKPOINT:-${CKPT:-outputs/streampetr_ttc_frozen_20e/iter_140650.pth}}"
 ANN_FILE="${ANN_FILE:-data/nuscenes/nuscenes2d_temporal_infos_val.pkl}"
 NUSCENES_ROOT_RESOLVED="${COMPARE_DATA_ROOT:-${NUSCENES_ROOT:-$(pwd)/data/nuscenes}}"

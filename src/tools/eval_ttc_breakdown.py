@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
-"""Per–GT-object TTC accuracy (MAE / RMSE / counts) by nuScenes class and by GT TTC bin.
+"""Per–GT-object TTC accuracy (MAE / RMSE / mean signed error / counts) by class and GT TTC bin.
 
-Uses the same matcher and TTC head as training (``StreamPETRHead.loss_ttc``). Run on a temporal
-``--ann-file`` with GT TTC pickle, same as ``eval_ttc_mlp.py``.
+**Default (MLP):** uses ``StreamPETRHead.ttc_pairwise_errors`` — same matching as ``loss_ttc``.
 
-Example:
+**``--physics``:** uses ``ttc_pairwise_physics_from_preds`` (BEV closure on **predicted** boxes+vel).
+Load a **detector** checkpoint (e.g. ``stream_petr_vov_flash_*.pth``), not the TTC-finetuned head.
+Writes ``eval_ttc_physics_breakdown/ttc_physics_breakdown.json`` next to that checkpoint (or under ``--save-dir``).
+
+Example (MLP):
   python tools/eval_ttc_breakdown.py \\
     projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e.py \\
     work_dirs/streampetr_ttc_frozen_20e/latest.pth \\
     --ann-file data/nuscenes/nuscenes2d_temporal_infos_val.pkl \\
     --max-batches 50
 
-Writes ``eval_ttc_breakdown/`` under the checkpoint directory: ``ttc_breakdown.json`` and
-``ttc_breakdown_by_class.png`` (if matplotlib is available).
+Example (physics baseline on val):
+  python tools/eval_ttc_breakdown.py \\
+    projects/configs/StreamPETR/stream_petr_vov_ttc_frozen_20e.py \\
+    ckpts/stream_petr_vov_flash_800_bs2_seq_24e.pth \\
+    --ann-file data/nuscenes/nuscenes2d_temporal_infos_val.pkl \\
+    --max-batches 1000 --physics
+
+Writes ``eval_ttc_breakdown/ttc_breakdown.json`` (MLP) or ``ttc_physics_breakdown.json`` (``--physics``),
+plus ``ttc_breakdown_by_class.png`` when applicable.
 """
 from __future__ import annotations
 
@@ -69,6 +79,13 @@ def parse_args():
         help="Default: <checkpoint_dir>/eval_ttc_breakdown",
     )
     p.add_argument("--no-save", action="store_true")
+    p.add_argument(
+        "--physics",
+        action="store_true",
+        help="BEV physics TTC from pred boxes+vel (same closure as labels), not the MLP. "
+        "Use a **detector** checkpoint (e.g. stream_petr_vov_flash) — same config as TTC training so "
+        "the model has ttc_pairwise_physics_from_preds. Writes eval_ttc_physics_breakdown/ttc_physics_breakdown.json.",
+    )
     return p.parse_args()
 
 
@@ -93,7 +110,13 @@ def _stats(pred: np.ndarray, tgt: np.ndarray) -> dict:
     err = pred - tgt
     mae = float(np.mean(np.abs(err)))
     rmse = float(np.sqrt(np.mean(err**2)))
-    return {"n": int(pred.shape[0]), "mae_s": mae, "rmse_s": rmse}
+    mean_error_s = float(np.mean(err))
+    return {
+        "n": int(pred.shape[0]),
+        "mae_s": mae,
+        "rmse_s": rmse,
+        "mean_error_s": mean_error_s,
+    }
 
 
 def _unwrap_dc(x):
@@ -227,7 +250,7 @@ def run_breakdown(model, data_loader, device_id: int, class_names: list[str], ma
     for c in range(n_cls):
         m = cls == c
         if not np.any(m):
-            by_class[class_names[c]] = {"n": 0, "mae_s": None, "rmse_s": None}
+            by_class[class_names[c]] = {"n": 0, "mae_s": None, "rmse_s": None, "mean_error_s": None}
         else:
             by_class[class_names[c]] = _stats(pred[m], tgt[m])
 
@@ -238,11 +261,125 @@ def run_breakdown(model, data_loader, device_id: int, class_names: list[str], ma
         m = (tgt >= lo) & (tgt < hi)
         key = f"[{lo:g},{hi:g})" if hi < 100 else f"[{lo:g},inf)"
         if not np.any(m):
-            by_gt_bin[key] = {"n": 0, "mae_s": None, "rmse_s": None}
+            by_gt_bin[key] = {"n": 0, "mae_s": None, "rmse_s": None, "mean_error_s": None}
         else:
             by_gt_bin[key] = _stats(pred[m], tgt[m])
 
     return {
+        "mode": "mlp",
+        "n_batches": n_batch,
+        "n_pairs": int(pred.shape[0]),
+        "overall": overall,
+        "by_class": by_class,
+        "by_gt_ttc_bin_s": by_gt_bin,
+    }
+
+
+def run_breakdown_physics(model, data_loader, device_id: int, class_names: list[str], max_batches: int):
+    """Like ``run_breakdown`` but TTC from ``ttc_pairwise_physics_from_preds`` (detector boxes + vel)."""
+    head = model.module.pts_bbox_head
+    if not hasattr(head, "ttc_pairwise_physics_from_preds"):
+        raise RuntimeError("pts_bbox_head has no ttc_pairwise_physics_from_preds (need StreamPETR head).")
+    det = model.module
+    num_frame_losses = int(det.num_frame_losses)
+
+    pred_all: list[np.ndarray] = []
+    tgt_all: list[np.ndarray] = []
+    cls_all: list[np.ndarray] = []
+
+    n_skip_no_box = 0
+    n_skip_no_gt_ttc = 0
+    n_skip_pw_none = 0
+    n_frames_seen = 0
+
+    model.train()
+    n_batch = 0
+    with torch.no_grad():
+        for bi, data in enumerate(data_loader):
+            if max_batches > 0 and bi >= max_batches:
+                break
+            data = scatter(data, [device_id])[0]
+            if hasattr(head, "reset_memory"):
+                head.reset_memory()
+            if "img" not in data:
+                raise RuntimeError("eval_ttc_breakdown --physics: batch has no 'img' after scatter.")
+            T = int(_unwrap_dc(data["img"]).size(1))
+            outs_frames: list = []
+
+            def _hook(_m, _inp, out):
+                outs_frames.append(out)
+
+            handle = det.pts_bbox_head.register_forward_hook(_hook)
+            try:
+                model.module(return_loss=True, **data)
+            finally:
+                handle.remove()
+            start_f = max(0, T - num_frame_losses)
+            for i in range(start_f, T):
+                if i >= len(outs_frames):
+                    break
+                n_frames_seen += 1
+                outs = outs_frames[i]
+                if outs is None or outs.get("all_bbox_preds") is None:
+                    n_skip_no_box += 1
+                    continue
+                gt_ttc_i = data["gt_ttc"][i] if "gt_ttc" in data else None
+                if gt_ttc_i is None:
+                    n_skip_no_gt_ttc += 1
+                    continue
+                bs = int(outs["all_cls_scores"][-1].size(0))
+                gt_ttc_list = _as_list_len_bs(gt_ttc_i, bs)
+                gtb = _unwrap_dc(data["gt_bboxes_3d"][i])
+                gtl = _unwrap_dc(data["gt_labels_3d"][i])
+                gt_bl = _as_list_len_bs(gtb, bs)
+                gt_ll = _as_list_len_bs(gtl, bs)
+                pw = head.ttc_pairwise_physics_from_preds(outs, gt_bl, gt_ll, gt_ttc_list)
+                if pw is None:
+                    n_skip_pw_none += 1
+                    continue
+                pred_all.append(pw["pred"].numpy())
+                tgt_all.append(pw["tgt"].numpy())
+                cls_all.append(pw["cls"].numpy())
+
+            n_batch += 1
+
+    if not pred_all:
+        return {
+            "mode": "physics",
+            "error": "no TTC pairs collected (physics path)",
+            "n_batches": n_batch,
+            "n_frames_seen": n_frames_seen,
+            "skipped_no_all_bbox_preds": n_skip_no_box,
+            "skipped_no_gt_ttc": n_skip_no_gt_ttc,
+            "skipped_pairwise_none": n_skip_pw_none,
+        }
+
+    pred = np.concatenate(pred_all)
+    tgt = np.concatenate(tgt_all)
+    cls = np.concatenate(cls_all)
+    overall = _stats(pred, tgt)
+
+    by_class: dict = {}
+    n_cls = len(class_names)
+    for c in range(n_cls):
+        m = cls == c
+        if not np.any(m):
+            by_class[class_names[c]] = {"n": 0, "mae_s": None, "rmse_s": None, "mean_error_s": None}
+        else:
+            by_class[class_names[c]] = _stats(pred[m], tgt[m])
+
+    bins = [(0.0, 1.0), (1.0, 3.0), (3.0, 10.0), (10.0, 1e9)]
+    by_gt_bin: dict = {}
+    for lo, hi in bins:
+        m = (tgt >= lo) & (tgt < hi)
+        key = f"[{lo:g},{hi:g})" if hi < 100 else f"[{lo:g},inf)"
+        if not np.any(m):
+            by_gt_bin[key] = {"n": 0, "mae_s": None, "rmse_s": None, "mean_error_s": None}
+        else:
+            by_gt_bin[key] = _stats(pred[m], tgt[m])
+
+    return {
+        "mode": "physics",
         "n_batches": n_batch,
         "n_pairs": int(pred.shape[0]),
         "overall": overall,
@@ -318,22 +455,32 @@ def main():
     load_checkpoint(model.module, args.checkpoint, map_location="cpu", strict=False)
 
     class_names = _accumulate_class_names(cfg)
-    print("Collecting matched pred/GT TTC (same assignment as training loss_ttc)...")
-    out = run_breakdown(model, data_loader, args.gpu_id, class_names, args.max_batches)
+    if args.physics:
+        print("Collecting physics TTC (pred bbox + vel, same closure as labels)...")
+        out = run_breakdown_physics(model, data_loader, args.gpu_id, class_names, args.max_batches)
+    else:
+        print("Collecting matched pred/GT TTC (same assignment as training loss_ttc)...")
+        out = run_breakdown(model, data_loader, args.gpu_id, class_names, args.max_batches)
     print(json.dumps(out, indent=2))
 
     if not args.no_save:
+        if args.physics:
+            sub = "eval_ttc_physics_breakdown"
+            js_name = "ttc_physics_breakdown.json"
+        else:
+            sub = "eval_ttc_breakdown"
+            js_name = "ttc_breakdown.json"
         save_dir = args.save_dir or os.path.join(
             os.path.dirname(os.path.abspath(args.checkpoint)) or ".",
-            "eval_ttc_breakdown",
+            sub,
         )
         os.makedirs(save_dir, exist_ok=True)
-        js = os.path.join(save_dir, "ttc_breakdown.json")
+        js = os.path.join(save_dir, js_name)
         with open(js, "w", encoding="utf-8") as f:
             json.dump(out, f, indent=2)
         print(f"Wrote {js}")
         png = os.path.join(save_dir, "ttc_breakdown_by_class.png")
-        if "by_class" in out:
+        if "by_class" in out and not out.get("error"):
             _plot_by_class(png, out["by_class"])
             if os.path.isfile(png):
                 print(f"Wrote {png}")

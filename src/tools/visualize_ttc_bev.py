@@ -12,6 +12,12 @@ Example (BEV only):
 
 Example (cameras left, TTC BEV right):
   python tools/visualize_ttc_bev.py ... --with-cameras
+
+Example (one keyframe per listed **scene** — qualitative table):
+  python tools/visualize_ttc_bev.py \\
+    --data-root ./data/nuscenes --ttc-labels ./data/nuscenes/ttc_gt_labels_v1_0_mini.pkl \\
+    --version v1.0-mini --out-dir ./work_dirs/ttc_bev_pick --with-cameras \\
+    --scene-tokens scene-0061,scene-0103
 """
 from __future__ import annotations
 
@@ -142,6 +148,22 @@ def parse_args():
         action="store_true",
         help="When --with-cameras, also write the BEV-only PNG (*_ttc_bev.png).",
     )
+    p.add_argument(
+        "--sample-tokens",
+        default=None,
+        help="Comma-separated **sample** tokens to render (overrides default loop).",
+    )
+    p.add_argument(
+        "--scene-tokens",
+        default=None,
+        help="Comma-separated **scene** tokens; render keyframes from each scene. "
+        "By default only the **first** keyframe per scene; use --scene-all-keyframes for every keyframe.",
+    )
+    p.add_argument(
+        "--scene-all-keyframes",
+        action="store_true",
+        help="With --scene-tokens, walk the full scene (can be many PNGs).",
+    )
     return p.parse_args()
 
 
@@ -165,9 +187,30 @@ def main():
     nusc = NuScenes(version=args.version, dataroot=args.data_root, verbose=False)
     os.makedirs(args.out_dir, exist_ok=True)
 
-    samples = nusc.sample
-    if args.max_samples > 0:
-        samples = samples[: args.max_samples]
+    def _iter_samples_from_scenes(scene_tok_list, all_keyframes: bool):
+        for st in scene_tok_list:
+            st = st.strip()
+            if not st:
+                continue
+            sc = nusc.get("scene", st)
+            tok = sc["first_sample_token"]
+            while tok:
+                yield nusc.get("sample", tok)
+                if not all_keyframes:
+                    break
+                nxt = nusc.get("sample", tok).get("next", "")
+                tok = nxt if nxt else ""
+
+    if args.sample_tokens:
+        toks = [t.strip() for t in args.sample_tokens.split(",") if t.strip()]
+        samples = [nusc.get("sample", t) for t in toks]
+    elif args.scene_tokens:
+        scene_list = [s for s in args.scene_tokens.split(",") if s.strip()]
+        samples = list(_iter_samples_from_scenes(scene_list, args.scene_all_keyframes))
+    else:
+        samples = nusc.sample
+        if args.max_samples > 0:
+            samples = samples[: args.max_samples]
 
     grid_positions = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
 

@@ -50,7 +50,7 @@ export SKIP_ABLATION_TABLE="${SKIP_ABLATION_TABLE:-0}"
 
 export VALIDATE_NUSCENES_INFOS_EXPECT="${VALIDATE_NUSCENES_INFOS_EXPECT:-v1.0-trainval}"
 
-export CHECKPOINT="${CHECKPOINT:-${CKPT:-outputs/streampetr_ttc_frozen_20e_4gpu/latest.pth}}"
+export CHECKPOINT="${CHECKPOINT:-${CKPT:-work_dirs/streampetr_ttc_v3_frozen_20e_4gpu/latest.pth}}"
 
 export MAX_BATCHES="${MAX_BATCHES:-1000}"
 export BREAKDOWN_MAX_BATCHES="${BREAKDOWN_MAX_BATCHES:-1000}"

@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import gc
 import json
 import os
 import sys
@@ -1151,6 +1152,13 @@ def parse_args():
         "gt | physics | mlp | none (e.g. gt,physics,mlp). "
         "Each column uses that TTC for wireframe color. Default: one column from --cam-bbox-ttc.",
     )
+    p.add_argument(
+        "--samples-per-gpu",
+        type=int,
+        default=None,
+        help="Override cfg.data.samples_per_gpu for this scene dataloader. "
+        "Use **1** on 8–12GB GPUs to avoid OOM (default: from config, often 2).",
+    )
     return p.parse_args()
 
 
@@ -1657,7 +1665,12 @@ def main():
     subset = torch.utils.data.Subset(full_ds, idxs)
     # Subset lacks ``dataset.flag``; StreamPETR's InfiniteGroupEachSampleInBatchSampler also assumes
     # enough sequence groups per batch. Use plain DataLoader + mmcv collate for this filtered eval.
-    spg = int(cfg.data.samples_per_gpu)
+    spg = int(args.samples_per_gpu) if args.samples_per_gpu is not None else int(cfg.data.samples_per_gpu)
+    if spg < 1:
+        raise SystemExit("--samples-per-gpu must be >= 1")
+    if args.samples_per_gpu is not None:
+        print(f"Using samples_per_gpu={spg} (overrides cfg {cfg.data.samples_per_gpu}) for this scene run.")
+    # Subset can be any length: last batch can be < spg; collate handles it.
     data_loader = DataLoader(
         subset,
         batch_size=spg,
@@ -1693,6 +1706,10 @@ def main():
     batches_cpu: list = []
     for data in data_loader:
         batches_cpu.append(data)
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     print("=== Baseline: physics TTC from predicted bbox (lidar BEV, ego at origin) ===")
     model_b = fresh_model()
