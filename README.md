@@ -76,6 +76,7 @@ The **physics baseline** applies the same closure model used to generate labels 
   <img src="docs/imgs/ttc_mlp_qandv_loss.png" width="49%" />
 </p>
 <p align="center"><em>Training loss (mean Σ frame × loss_ttc per batch) for MLP query-only (left) and MLP query + velocity (right). Lower is better.</em></p>
+
 ---
 
 ## 2. Conditional breakdown by GT TTC bin
@@ -161,6 +162,32 @@ Four scenes chosen to stress-test different driving regimes. Each panel shows CA
 <p align="center">
   <img src="docs/imgs/close_objects_summary.png" alt="Close-objects/Lots of Barriers Summary" width="92%" />
 </p>
+
+
+# Error Discussion
+
+To better understand the limitations of each predictor, we analyzed failure cases across TTC bins, object classes, and driving scenarios. The physics baseline, while competitive overall (MAE of 1.48s) relies entirely on predicted bounding box positions and velocities from StreamPETR (original paper contributions). When StreamPETR's velocity estimates are noisy or the closing-speed assumption breaks down (e.g. when objects are moving laterally rather than directly toward the ego vehicle) the physics model degrades significantly. This is most visible in the [3, 10) second bin, where the MLP query-only head actually outperforms the physics baseline (MAE of 1.59s vs. 1.97s), suggesting that learned query features can indeed actually capture some geometric context that simple closure-speed cannot.
+
+### Per-Class Failure Modes
+
+The per-class breakdown reveals where each approach struggles most. The physics baseline achieves a low MAE of 0.17s on pedestrians, suggesting that pedestrian velocities in nuScenes are well-estimated by StreamPETR and that pedestrian motion is largely radial. However, the MLP heads perform poorly on pedestrians (4.79s and 0.72s for query-only and query+velocity respectively), with the query-only variant failing severely. This points to a fundamental representational gap: the frozen StreamPETR query embeddings, trained for 3D detection rather than risk estimation, may not encode the fine-grained velocity information needed to distinguish a pedestrian stepping into the road from one standing still. The addition of explicit velocity embeddings partially recovers this, dropping pedestrian MAE from 4.79s to 0.72s. This shows that velocity is a critical input feature for learned TTC estimation.
+
+### Short-Horizon Safety-Critical Failures
+
+The most safety-critical failure mode is in the [0, 1) second bin, which represents imminent collision scenarios. All learned approaches fail here, with the MLP heads producing MAEs of 3.80–4.29s compared to the physics baseline's 0.46s. This is partly a data imbalance issue: the nuScenes dataset contains very few samples with ground-truth TTC under one second, since the dataset was not collected under collision conditions. As a result, the MLP head has almost no supervision signal to learn from in this regime and likely defaults to predicting mid-range TTC values. This represents a fundamental limitation of training on naturalistic driving data and suggests that future work should incorporate synthetic collision scenarios or data augmentation strategies to improve safety-critical recall.
+
+### Qualitative Failure Cases
+
+Qualitative evaluation across four stress-test scenes further illustrates these failure modes. In the barriers scene, the physics model correctly assigns high-TTC values to nearly-static roadside objects, whereas the MLP head predicts slightly lower values, suggesting it has not fully learned to distinguish static obstacles from moving ones using query features alone. In the intersection scene, both predictors struggle with vehicles executing crossing maneuvers, where instantaneous closing speed is a poor proxy for actual collision risk due to the crossing geometry. In contrast, the straight-away and parking scenes (where objects move predictably in the ego vehicle's direction) show lower errors across the board, confirming that all approaches benefit from simpler motion geometry.
+
+### Summary of Limitations and Future Directions
+
+Taken together, the error analysis points to three key limitations:
+1. The frozen StreamPETR backbone was not trained with TTC in mind so its query embeddings lack dedicated risk-relevant features.
+2. The training distribution is skewed toward mid-range and capped TTC values, starving the model of supervision in the most critical near-collision regime.
+3. The simple MLP head architecture cannot fully exploit temporal context across frames, which would be essential for handling complex maneuvers.
+
+Future work could address these by fine-tuning the backbone jointly with the TTC head, training on datasets with simulated collision scenarios, and incorporating a recurrent or attention-based head that reasons over object trajectories rather than single-frame features.
 
 
 Based on [StreamPETR](https://github.com/exiawsh/StreamPETR) (ICCV 2023).
