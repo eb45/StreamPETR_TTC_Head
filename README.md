@@ -72,10 +72,12 @@ The **physics baseline** applies the same closure model used to generate labels 
 
 
 <p align="center">
-  <img src="docs/imgs/ttc_mlp_v1_loss.png" width="49%" />
-  <img src="docs/imgs/ttc_mlp_qandv_loss.png" width="49%" />
+  <figure>
+    <img src="docs/imgs/ttc_mlp_v1_loss.png" width="49%" />
+    <img src="docs/imgs/ttc_mlp_qandv_loss.png" width="49%" />
+    <figcaption align="center"><em>Training loss (mean Σ frame × loss_ttc per batch) for MLP query-only (left) and MLP query + velocity (right). Lower is better. Trained TTC head with query + velocity embeddings shows clear improvement over the pretrained baseline.</em></figcaption>
+  </figure>
 </p>
-
 ---
 
 ## 2. Conditional breakdown by GT TTC bin
