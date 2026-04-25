@@ -1,0 +1,42 @@
+# Python 3.8, CUDA 11.1 / Torch 1.9 stack (per docs/setup.md, SETUP.md)
+#
+# Install:
+#   pip install -r requirements.txt
+# Then install MMDetection3D from the vendored source:
+#   cd mmdetection3d && pip install -e .
+
+-f https://download.pytorch.org/whl/torch_stable.html
+-f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9.0/index.html
+
+torch==1.9.0+cu111
+torchvision==0.10.0+cu111
+torchaudio==0.9.0
+
+mmcv-full==1.6.0
+mmdet==2.28.2
+mmsegmentation==0.30.0
+
+# Core packages
+numpy
+scipy
+pandas
+matplotlib
+Pillow
+tqdm
+
+# nuScenes + geometry utilities
+nuscenes-devkit
+pyquaternion
+shapely
+
+# For visualization
+opencv-python
+imageio
+imageio-ffmpeg
+
+# Model utility deps imported by backbones/utils
+einops
+fvcore
+
+# Logging
+wandb
