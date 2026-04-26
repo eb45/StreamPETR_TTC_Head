@@ -22,8 +22,8 @@ This project uses time-to-collision (TTC) as a risk metric for autonomous drivin
 
 ## Video Links
 
-- **Demo:** *[ADD DEMO VIDEO URL HERE]*
-- **Technical walkthrough:** https://youtu.be/4VE-BeA9XKo
+- **Demo:** https://youtu.be/GsEots-qYzw
+- **Technical walkthrough:** https://youtu.be/9uGHDp0meTM
 
 ## Data
 
