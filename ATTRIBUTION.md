@@ -29,5 +29,9 @@ Optional:
 
 ## AI-generated material
 
-- ADD HERE
-
+- Slurm job scripts, shell wrappers, etc.
+- Adding docstrings to files
+- Structure of the notebooks
+- Debugging help (path resolutions, fixing OOM errors, etc.)
+- Repo maintenance like generating requirements.txt file
+- Some of the more mathematical portions like the equations for generating TTC labels
